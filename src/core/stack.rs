@@ -4,7 +4,7 @@ use everscale_types::prelude::*;
 use num_bigint::BigInt;
 use num_traits::{ToPrimitive, Zero};
 
-use crate::continuation::*;
+use super::cont::*;
 use crate::error::*;
 
 pub struct Stack {
@@ -24,37 +24,37 @@ impl Stack {
         self.items.len()
     }
 
-    pub fn check_underflow(&self, n: usize) -> FiftResult<()> {
+    pub fn check_underflow(&self, n: usize) -> Result<()> {
         if n > self.items.len() {
-            Err(FiftError::StackUnderflow)
+            Err(Error::StackUnderflow)
         } else {
             Ok(())
         }
     }
 
-    pub fn fetch(&self, idx: usize) -> FiftResult<Box<dyn StackValue>> {
+    pub fn fetch(&self, idx: usize) -> Result<Box<dyn StackValue>> {
         let len = self.items.len();
         if idx < len {
             let item = self.items[len - idx - 1].as_ref();
             Ok(dyn_clone::clone_box(item))
         } else {
-            Err(FiftError::StackUnderflow)
+            Err(Error::StackUnderflow)
         }
     }
 
-    pub fn swap(&mut self, lhs: usize, rhs: usize) -> FiftResult<()> {
+    pub fn swap(&mut self, lhs: usize, rhs: usize) -> Result<()> {
         let len = self.items.len();
         if lhs >= len || rhs >= len {
-            return Err(FiftError::StackUnderflow);
+            return Err(Error::StackUnderflow);
         }
         self.items.swap(len - lhs - 1, len - rhs - 1);
         Ok(())
     }
 
-    pub fn push(&mut self, item: Box<dyn StackValue>) -> FiftResult<()> {
+    pub fn push(&mut self, item: Box<dyn StackValue>) -> Result<()> {
         if let Some(capacity) = &mut self.capacity {
             if self.items.len() >= *capacity {
-                return Err(FiftError::StackOverflow);
+                return Err(Error::StackOverflow);
             }
             *capacity += 1;
         }
@@ -62,47 +62,51 @@ impl Stack {
         Ok(())
     }
 
-    pub fn push_bool(&mut self, value: bool) -> Result<(), FiftError> {
+    pub fn push_bool(&mut self, value: bool) -> Result<()> {
         self.push(Box::new(BigInt::from(if value { -1i8 } else { 0i8 })))
     }
 
-    pub fn push_smallint(&mut self, value: u32) -> FiftResult<()> {
+    pub fn push_smallint(&mut self, value: u32) -> Result<()> {
         self.push(Box::new(BigInt::from(value)))
     }
 
-    pub fn push_argcount(&mut self, args: u32, cont: Continuation) -> FiftResult<()> {
+    pub fn push_argcount(&mut self, args: u32, cont: Cont) -> Result<()> {
         self.push(Box::new(BigInt::from(args)))?;
         self.push(Box::new(cont))
     }
 
-    pub fn pop(&mut self) -> FiftResult<Box<dyn StackValue>> {
-        self.items.pop().ok_or(FiftError::StackUnderflow)
+    pub fn pop(&mut self) -> Result<Box<dyn StackValue>> {
+        self.items.pop().ok_or(Error::StackUnderflow)
     }
 
-    pub fn pop_bool(&mut self) -> FiftResult<bool> {
+    pub fn pop_bool(&mut self) -> Result<bool> {
         // TODO: use custom strange bool and different cast to bool
         let item = self.pop()?.into_int()?;
         Ok(!item.is_zero())
     }
 
-    pub fn pop_smallint_range(&mut self, min: u32, max: u32) -> FiftResult<u32> {
+    pub fn pop_smallint_range(&mut self, min: u32, max: u32) -> Result<u32> {
         let item = self.pop()?.into_int()?;
         if let Some(item) = item.as_ref().to_u32() {
             if item <= max && item >= min {
                 return Ok(item);
             }
         }
-        Err(FiftError::ExpectedIntegerInRange)
+        Err(Error::ExpectedIntegerInRange)
     }
 
-    pub fn pop_argcount(&mut self) -> FiftResult<Continuation> {
+    pub fn pop_smallint_char(&mut self) -> Result<char> {
+        char::from_u32(self.pop_smallint_range(0, char::MAX as u32)?).ok_or(Error::InvalidChar)
+    }
+
+    pub fn pop_argcount(&mut self) -> Result<Cont> {
         let cont = self.pop()?.into_cont()?;
         let count = self.pop_smallint_range(0, 255)? as usize;
         self.check_underflow(count)?;
         Ok(*cont)
     }
 
-    pub fn pop_compile(&mut self) -> FiftResult<()> {
+    pub fn pop_compile(&mut self) -> Result<()> {
         todo!()
     }
 
@@ -149,22 +153,6 @@ impl Stack {
     }
 }
 
-pub struct StackValueDump<'a>(pub &'a dyn StackValue);
-
-impl std::fmt::Display for StackValueDump<'_> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        self.0.dump(f)
-    }
-}
-
-pub struct StackValuePrintList<'a>(pub &'a dyn StackValue);
-
-impl std::fmt::Display for StackValuePrintList<'_> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        self.0.print_list(f)
-    }
-}
-
 macro_rules! define_stack_value {
     ($trait:ident($value_type:ident), {$(
         $name:ident($ty:ty) = {
@@ -183,12 +171,12 @@ macro_rules! define_stack_value {
 
             fn dump(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result;
 
-            $(fn $cast(&self) -> FiftResult<&$cast_res> {
-                Err(FiftError::InvalidType)
+            $(fn $cast(&self) -> Result<&$cast_res> {
+                Err(Error::InvalidType)
             })*
 
-            $(fn $into(self: Box<Self>) -> FiftResult<Box<$ty>> {
-                Err(FiftError::InvalidType)
+            $(fn $into(self: Box<Self>) -> Result<Box<$ty>> {
+                Err(Error::InvalidType)
             })*
         }
 
@@ -205,12 +193,12 @@ macro_rules! define_stack_value {
                 $dump_body
             }
 
-            fn $cast(&self) -> FiftResult<&$cast_res> {
+            fn $cast(&self) -> Result<&$cast_res> {
                 let $cast_self = self;
                 $cast_body
             }
 
-            fn $into(self: Box<Self>) -> FiftResult<Box<$ty>> {
+            fn $into(self: Box<Self>) -> Result<Box<$ty>> {
                 Ok(self)
             }
         })*
@@ -281,23 +269,39 @@ define_stack_value! {
             as_tuple(v): StackTuple = Ok(v),
             into_tuple,
         },
-        Cont(Continuation) = {
+        Cont(Cont) = {
             dump(_v, f) = {
                 // TODO: dump content?
                 f.write_str("Cont")
             },
-            as_cont(v): Continuation = Ok(v),
+            as_cont(v): Cont = Ok(v),
             into_cont,
         }
     }
 }
 
-impl<'a> dyn StackValue + 'a {
-    pub fn display_dump(&self) -> StackValueDump {
+impl dyn StackValue + '_ {
+    pub fn display_dump(&self) -> impl std::fmt::Display + '_ {
+        pub struct StackValueDump<'a>(pub &'a dyn StackValue);
+
+        impl std::fmt::Display for StackValueDump<'_> {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                self.0.dump(f)
+            }
+        }
+
         StackValueDump(self)
     }
 
-    pub fn display_list(&self) -> StackValuePrintList {
+    pub fn display_list(&self) -> impl std::fmt::Display + '_ {
+        pub struct StackValuePrintList<'a>(pub &'a dyn StackValue);
+
+        impl std::fmt::Display for StackValuePrintList<'_> {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                self.0.print_list(f)
+            }
+        }
+
         StackValuePrintList(self)
     }
 

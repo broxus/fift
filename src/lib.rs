@@ -1,12 +1,21 @@
-pub use self::dictionary::*;
-pub use self::error::*;
-pub use self::stack::*;
-pub use crate::context::*;
+extern crate self as fift;
 
-mod context;
-mod continuation;
-mod dictionary;
-mod error;
-mod lexer;
-mod stack;
-mod words;
+pub use self::core::Context;
+
+pub mod core;
+pub mod error;
+pub mod modules;
+pub mod util;
+
+impl Context<'_> {
+    pub fn with_basic_modules(self) -> error::Result<Self> {
+        use modules::*;
+        self.with_module(BaseModule)?
+            .with_module(Arithmetic)?
+            .with_module(CellUtils)?
+            .with_module(Control)?
+            .with_module(DebugUtils)?
+            .with_module(StackUtils)?
+            .with_module(StringUtils)
+    }
+}

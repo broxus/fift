@@ -1,24 +1,24 @@
 use std::collections::hash_map::{self, HashMap};
 use std::rc::Rc;
 
-use crate::continuation::*;
+use super::cont::{Cont, ContImpl, ContextTailWordFunc, ContextWordFunc, StackWordFunc};
+use super::stack::Stack;
 use crate::error::*;
-use crate::stack::*;
 
 pub struct DictionaryEntry {
-    pub definition: Continuation,
+    pub definition: Cont,
     pub active: bool,
 }
 
 impl DictionaryEntry {
-    pub fn new_ordinary(definition: Continuation) -> Self {
+    pub fn new_ordinary(definition: Cont) -> Self {
         Self {
             definition,
             active: false,
         }
     }
 
-    pub fn new_active(definition: Continuation) -> Self {
+    pub fn new_active(definition: Cont) -> Self {
         Self {
             definition,
             active: true,
@@ -28,12 +28,12 @@ impl DictionaryEntry {
 
 pub struct Dictionary {
     words: WordsMap,
-    nop: Continuation,
+    nop: Cont,
 }
 
 impl Default for Dictionary {
     fn default() -> Self {
-        fn interpret_nop(_: &mut Stack) -> FiftResult<()> {
+        fn interpret_nop(_: &mut Stack) -> Result<()> {
             Ok(())
         }
 
@@ -45,7 +45,7 @@ impl Default for Dictionary {
 }
 
 impl Dictionary {
-    pub fn make_nop(&self) -> Continuation {
+    pub fn make_nop(&self) -> Cont {
         self.nop.clone()
     }
 
@@ -53,7 +53,7 @@ impl Dictionary {
         self.words.get(name)
     }
 
-    pub fn resolve_name(&self, definition: &dyn ContinuationImpl) -> Option<&str> {
+    pub fn resolve_name(&self, definition: &dyn ContImpl) -> Option<&str> {
         for (name, entry) in &self.words {
             if Rc::as_ptr(&entry.definition) == definition {
                 return Some(name);
@@ -66,7 +66,7 @@ impl Dictionary {
         &mut self,
         name: T,
         f: ContextWordFunc,
-    ) -> FiftResult<()> {
+    ) -> Result<()> {
         self.define_word(
             name,
             DictionaryEntry {
@@ -80,7 +80,7 @@ impl Dictionary {
         &mut self,
         name: T,
         f: ContextTailWordFunc,
-    ) -> FiftResult<()> {
+    ) -> Result<()> {
         self.define_word(
             name,
             DictionaryEntry {
@@ -94,7 +94,7 @@ impl Dictionary {
         &mut self,
         name: T,
         f: ContextWordFunc,
-    ) -> FiftResult<()> {
+    ) -> Result<()> {
         self.define_word(
             name,
             DictionaryEntry {
@@ -104,11 +104,7 @@ impl Dictionary {
         )
     }
 
-    pub fn define_stack_word<T: Into<String>>(
-        &mut self,
-        name: T,
-        f: StackWordFunc,
-    ) -> FiftResult<()> {
+    pub fn define_stack_word<T: Into<String>>(&mut self, name: T, f: StackWordFunc) -> Result<()> {
         self.define_word(
             name,
             DictionaryEntry {
@@ -118,22 +114,18 @@ impl Dictionary {
         )
     }
 
-    pub fn define_word<T: Into<String>>(
-        &mut self,
-        name: T,
-        word: DictionaryEntry,
-    ) -> FiftResult<()> {
+    pub fn define_word<T: Into<String>>(&mut self, name: T, word: DictionaryEntry) -> Result<()> {
         fn define_word_impl(
             words: &mut WordsMap,
             name: String,
             word: DictionaryEntry,
-        ) -> FiftResult<()> {
+        ) -> Result<()> {
             match words.entry(name) {
                 hash_map::Entry::Vacant(entry) => {
                     entry.insert(word);
                     Ok(())
                 }
-                hash_map::Entry::Occupied(_) => Err(FiftError::TypeRedefenition),
+                hash_map::Entry::Occupied(_) => Err(Error::TypeRedefenition),
             }
         }
         define_word_impl(&mut self.words, name.into(), word)

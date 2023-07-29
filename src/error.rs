@@ -1,7 +1,7 @@
-pub type FiftResult<T> = Result<T, FiftError>;
+pub type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Debug, thiserror::Error)]
-pub enum FiftError {
+pub enum Error {
     #[error("Cell error")]
     CellError(#[from] everscale_types::error::Error),
     #[error("IO error")]
@@ -14,6 +14,12 @@ pub enum FiftError {
     TypeRedefenition,
     #[error("Invalid number")]
     InvalidNumber,
+    #[error("Invalid char")]
+    InvalidChar,
+    #[error("Invalid string")]
+    InvalidString,
+    #[error("Invalid index")]
+    InvalidIndex,
     #[error("Undefined word")]
     UndefinedWord,
     #[error("Unexpected eof")]

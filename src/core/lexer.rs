@@ -1,8 +1,5 @@
 use std::io::BufRead;
 
-use num_bigint::BigInt;
-use num_traits::Num;
-
 use crate::error::*;
 
 pub struct Lexer<'a> {
@@ -20,7 +17,7 @@ impl<'a> Lexer<'a> {
         }
     }
 
-    pub fn scan_word(&mut self) -> FiftResult<Option<Token<'_>>> {
+    pub fn scan_word(&mut self) -> Result<Option<Token<'_>>> {
         loop {
             if (self.line.is_empty() || self.line_offset >= self.line.len()) && !self.read_line()? {
                 return Ok(None);
@@ -41,9 +38,9 @@ impl<'a> Lexer<'a> {
         }
     }
 
-    pub fn scan_word_until<P: Delimiter>(&mut self, mut p: P) -> FiftResult<Token<'_>> {
+    pub fn scan_word_until<P: Delimiter>(&mut self, mut p: P) -> Result<Token<'_>> {
         if (self.line.is_empty() || self.line_offset >= self.line.len()) && !self.read_line()? {
-            return Err(FiftError::UnexpectedEof);
+            return Err(Error::UnexpectedEof);
         }
 
         let start = self.line_offset;
@@ -62,7 +59,7 @@ impl<'a> Lexer<'a> {
                 data: &self.line[start..end],
             })
         } else {
-            Err(FiftError::UnexpectedEof)
+            Err(Error::UnexpectedEof)
         }
     }
 
@@ -94,7 +91,9 @@ impl<'a> Lexer<'a> {
         self.line_offset = self.line.len();
     }
 
-    fn read_line(&mut self) -> FiftResult<bool> {
+    fn read_line(&mut self) -> Result<bool> {
+        self.line_offset = 0;
+        self.line.clear();
         let n = self.input.read_line(&mut self.line)?;
         Ok(n > 0)
     }
@@ -111,49 +110,6 @@ impl Token<'_> {
 
     pub fn delta(&self, subtoken: &str) -> usize {
         self.data.len() - subtoken.len()
-    }
-
-    pub fn parse_number(&self) -> FiftResult<Option<ImmediateInt>> {
-        let (num, denom) = if let Some((left, right)) = self.data.split_once('/') {
-            let Some(num) = Self::parse_single_number(left)? else {
-                return Ok(None);
-            };
-            let Some(denom) = Self::parse_single_number(right)? else {
-                return Err(FiftError::InvalidNumber);
-            };
-            (num, Some(denom))
-        } else {
-            let Some(num) = Self::parse_single_number(self.data)? else {
-                return Ok(None);
-            };
-            (num, None)
-        };
-        Ok(Some(ImmediateInt { num, denom }))
-    }
-
-    fn parse_single_number(s: &str) -> FiftResult<Option<BigInt>> {
-        let (neg, s) = match s.strip_prefix('-') {
-            Some(s) => (true, s),
-            None => (false, s),
-        };
-
-        let mut num = if let Some(s) = s.strip_prefix("0x") {
-            BigInt::from_str_radix(s, 16)
-        } else if let Some(s) = s.strip_prefix("0b") {
-            BigInt::from_str_radix(s, 2)
-        } else {
-            if !s.chars().all(|c| c.is_ascii_digit()) {
-                return Ok(None);
-            }
-            BigInt::from_str_radix(s, 10)
-        }
-        .map_err(|_| FiftError::InvalidNumber)?;
-
-        if neg {
-            num = -num;
-        }
-
-        Ok(Some(num))
     }
 }
 
@@ -185,9 +141,4 @@ impl Delimiter for char {
     fn delim(&mut self, c: char) -> bool {
         *self == c
     }
-}
-
-pub struct ImmediateInt {
-    pub num: BigInt,
-    pub denom: Option<BigInt>,
 }
