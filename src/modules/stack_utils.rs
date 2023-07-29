@@ -1,4 +1,3 @@
-use num_bigint::BigInt;
 use num_traits::Zero;
 
 use crate::core::*;
@@ -23,24 +22,24 @@ impl StackUtils {
 
     #[cmd(name = "dup", stack)]
     fn interpret_dup(stack: &mut Stack) -> Result<()> {
-        stack.push(stack.fetch(0)?)
+        stack.push_raw(stack.fetch(0)?)
     }
 
     #[cmd(name = "2dup", stack)]
     fn interpret_2dup(stack: &mut Stack) -> Result<()> {
-        stack.push(stack.fetch(0)?)?;
-        stack.push(stack.fetch(0)?)
+        stack.push_raw(stack.fetch(0)?)?;
+        stack.push_raw(stack.fetch(0)?)
     }
 
     #[cmd(name = "over", stack)]
     fn interpret_over(stack: &mut Stack) -> Result<()> {
-        stack.push(stack.fetch(1)?)
+        stack.push_raw(stack.fetch(1)?)
     }
 
     #[cmd(name = "2over", stack)]
     fn interpret_2over(stack: &mut Stack) -> Result<()> {
-        stack.push(stack.fetch(3)?)?;
-        stack.push(stack.fetch(3)?)
+        stack.push_raw(stack.fetch(3)?)?;
+        stack.push_raw(stack.fetch(3)?)
     }
 
     #[cmd(name = "swap", stack)]
@@ -57,7 +56,7 @@ impl StackUtils {
     #[cmd(name = "tuck", stack)]
     fn interpret_tuck(stack: &mut Stack) -> Result<()> {
         stack.swap(0, 1)?;
-        stack.push(stack.fetch(1)?)
+        stack.push_raw(stack.fetch(1)?)
     }
 
     #[cmd(name = "nip", stack)]
@@ -82,7 +81,7 @@ impl StackUtils {
     #[cmd(name = "pick", stack)]
     fn interpret_pick(stack: &mut Stack) -> Result<()> {
         let n = stack.pop_smallint_range(0, 255)? as usize;
-        stack.push(stack.fetch(n)?)
+        stack.push_raw(stack.fetch(n)?)
     }
 
     #[cmd(name = "roll", stack)]
@@ -134,13 +133,13 @@ impl StackUtils {
 
     #[cmd(name = "depth", stack)]
     fn interpret_depth(stack: &mut Stack) -> Result<()> {
-        stack.push(Box::new(BigInt::from(stack.depth())))
+        stack.push_int(stack.depth())
     }
 
     #[cmd(name = "?dup", stack)]
     fn interpret_cond_dup(stack: &mut Stack) -> Result<()> {
         if !stack.pop()?.as_int()?.is_zero() {
-            stack.push(stack.fetch(0)?)?;
+            stack.push_raw(stack.fetch(0)?)?;
         }
         Ok(())
     }

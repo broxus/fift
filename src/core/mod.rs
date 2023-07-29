@@ -173,9 +173,9 @@ impl ContImpl for InterpreterCont {
 
                 // Try parse as number
                 if let Some(value) = ImmediateInt::try_from_str(token.data)? {
-                    ctx.stack.push(Box::new(value.num))?;
+                    ctx.stack.push(value.num)?;
                     if let Some(denom) = value.denom {
-                        ctx.stack.push(Box::new(denom))?;
+                        ctx.stack.push(denom)?;
                         ctx.stack.push_argcount(2, ctx.dictionary.make_nop())?;
                     } else {
                         ctx.stack.push_argcount(1, ctx.dictionary.make_nop())?;

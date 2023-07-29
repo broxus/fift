@@ -8,8 +8,8 @@ impl DebugUtils {
     #[cmd(name = ".", args(space_after = true))]
     #[cmd(name = "._", args(space_after = false))]
     fn interpret_dot(ctx: &mut Context, space_after: bool) -> Result<()> {
-        let item = ctx.stack.pop()?.into_int()?;
-        write!(ctx.stdout, "{item}{}", opt_space(space_after))?;
+        let int = ctx.stack.pop_int()?;
+        write!(ctx.stdout, "{int}{}", opt_space(space_after))?;
         ctx.stdout.flush()?;
         Ok(())
     }
@@ -19,12 +19,12 @@ impl DebugUtils {
     #[cmd(name = "X.", args(uppercase = true, space_after = true))]
     #[cmd(name = "X._", args(uppercase = true, space_after = false))]
     fn interpret_dothex(ctx: &mut Context, uppercase: bool, space_after: bool) -> Result<()> {
-        let item = ctx.stack.pop()?.into_int()?;
+        let int = ctx.stack.pop_int()?;
         let space = opt_space(space_after);
         if uppercase {
-            write!(ctx.stdout, "{:X}{space}", item.as_ref())
+            write!(ctx.stdout, "{:X}{space}", int.as_ref())
         } else {
-            write!(ctx.stdout, "{:x}{space}", item.as_ref())
+            write!(ctx.stdout, "{:x}{space}", int.as_ref())
         }?;
         ctx.stdout.flush()?;
         Ok(())
@@ -33,8 +33,8 @@ impl DebugUtils {
     #[cmd(name = "b.", args(space_after = true))]
     #[cmd(name = "b._", args(space_after = false))]
     fn interpret_dotbin(ctx: &mut Context, space_after: bool) -> Result<()> {
-        let item = ctx.stack.pop()?.into_int()?;
-        write!(ctx.stdout, "{:b}{}", item.as_ref(), opt_space(space_after))?;
+        let int = ctx.stack.pop_int()?;
+        write!(ctx.stdout, "{:b}{}", int.as_ref(), opt_space(space_after))?;
         ctx.stdout.flush()?;
         Ok(())
     }
@@ -42,7 +42,7 @@ impl DebugUtils {
     #[cmd(name = "Bx._")]
     fn interpret_bytes_hex_print_raw(ctx: &mut Context) -> Result<()> {
         const CHUNK: usize = 16;
-        let bytes = ctx.stack.pop()?.into_bytes()?;
+        let bytes = ctx.stack.pop_bytes()?;
         let mut buffer: [u8; CHUNK * 2] = Default::default();
         for chunk in bytes.chunks(CHUNK) {
             let buffer = &mut buffer[..chunk.len() * 2];
@@ -94,7 +94,7 @@ impl DebugUtils {
 
     #[cmd(name = "cont.")]
     fn interpret_print_continuation(ctx: &mut Context) -> Result<()> {
-        let cont = ctx.stack.pop()?.into_cont()?;
+        let cont = ctx.stack.pop_cont()?;
         writeln!(ctx.stdout, "{}", cont.display_backtrace(&ctx.dictionary))?;
         ctx.stdout.flush()?;
         Ok(())
@@ -102,39 +102,39 @@ impl DebugUtils {
 
     #[cmd(name = "(dump)", stack)]
     fn interpret_dump_internal(stack: &mut Stack) -> Result<()> {
-        let item = stack.pop()?.display_dump().to_string();
-        stack.push(Box::new(item))
+        let string = stack.pop()?.display_dump().to_string();
+        stack.push(string)
     }
 
     #[cmd(name = "(ldump)", stack)]
     fn interpret_list_dump_internal(stack: &mut Stack) -> Result<()> {
-        let item = stack.pop()?.display_list().to_string();
-        stack.push(Box::new(item))
+        let string = stack.pop()?.display_list().to_string();
+        stack.push(string)
     }
 
     #[cmd(name = "(.)", stack)]
     fn interpret_dot_internal(stack: &mut Stack) -> Result<()> {
-        let item = stack.pop()?.into_int()?;
-        stack.push(Box::new(item.to_string()))
+        let string = stack.pop_int()?.to_string();
+        stack.push(string)
     }
 
     #[cmd(name = "(x.)", stack, args(upper = false))]
     #[cmd(name = "(X.)", stack, args(upper = true))]
     fn interpret_dothex_internal(stack: &mut Stack, upper: bool) -> Result<()> {
-        let item = stack.pop()?.into_int()?;
-        let item = if upper {
-            format!("{:x}", item.as_ref())
+        let int = stack.pop_int()?;
+        let string = if upper {
+            format!("{:x}", int.as_ref())
         } else {
-            format!("{:X}", item.as_ref())
+            format!("{:X}", int.as_ref())
         };
-        stack.push(Box::new(item))
+        stack.push(string)
     }
 
     #[cmd(name = "(b.)", stack)]
     fn interpret_dotbin_internal(stack: &mut Stack) -> Result<()> {
-        let item = stack.pop()?.into_int()?;
-        let item = format!("{:b}", item.as_ref());
-        stack.push(Box::new(item))
+        let int = stack.pop_int()?;
+        let string = format!("{:b}", int.as_ref());
+        stack.push(string)
     }
 }
 

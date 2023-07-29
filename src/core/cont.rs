@@ -332,7 +332,7 @@ impl ContImpl for IntLitCont {
             Ok(value) => value.0,
             Err(this) => this.0.clone(),
         };
-        ctx.stack.push(Box::new(value))?;
+        ctx.stack.push(value)?;
         Ok(None)
     }
 

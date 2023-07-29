@@ -27,18 +27,18 @@ impl Arithmetic {
 
     #[cmd(name = "+", stack)]
     fn interpret_plus(stack: &mut Stack) -> Result<()> {
-        let mut lhs = stack.pop()?.into_int()?;
-        let rhs = stack.pop()?.into_int()?;
+        let mut lhs = stack.pop_int()?;
+        let rhs = stack.pop_int()?;
         *lhs += *rhs;
-        stack.push(lhs)
+        stack.push_raw(lhs)
     }
 
     #[cmd(name = "-", stack)]
     fn interpret_minus(stack: &mut Stack) -> Result<()> {
-        let mut lhs = stack.pop()?.into_int()?;
-        let rhs = stack.pop()?.into_int()?;
+        let mut lhs = stack.pop_int()?;
+        let rhs = stack.pop_int()?;
         *lhs -= *rhs;
-        stack.push(lhs)
+        stack.push_raw(lhs)
     }
 
     #[cmd(name = "1+", stack, args(rhs = 1))]
@@ -46,56 +46,56 @@ impl Arithmetic {
     #[cmd(name = "2+", stack, args(rhs = 2))]
     #[cmd(name = "2-", stack, args(rhs = -2))]
     fn interpret_plus_imm(stack: &mut Stack, rhs: i32) -> Result<()> {
-        let mut lhs = stack.pop()?.into_int()?;
+        let mut lhs = stack.pop_int()?;
         *lhs += rhs;
-        stack.push(lhs)
+        stack.push_raw(lhs)
     }
 
     #[cmd(name = "negate", stack)]
     fn interpret_negate(stack: &mut Stack) -> Result<()> {
-        let mut lhs = stack.pop()?.into_int()?;
+        let mut lhs = stack.pop_int()?;
         *lhs = -std::mem::take(&mut lhs);
-        stack.push(lhs)
+        stack.push_raw(lhs)
     }
 
     #[cmd(name = "*", stack)]
     fn interpret_mul(stack: &mut Stack) -> Result<()> {
-        let mut lhs = stack.pop()?.into_int()?;
-        let rhs = stack.pop()?.into_int()?;
+        let mut lhs = stack.pop_int()?;
+        let rhs = stack.pop_int()?;
         *lhs *= *rhs;
-        stack.push(lhs)
+        stack.push_raw(lhs)
     }
 
     // TODO: other
 
     #[cmd(name = "not", stack)]
     fn interpret_not(stack: &mut Stack) -> Result<()> {
-        let mut lhs = stack.pop()?.into_int()?;
+        let mut lhs = stack.pop_int()?;
         *lhs = !std::mem::take(&mut lhs);
-        stack.push(lhs)
+        stack.push_raw(lhs)
     }
 
     #[cmd(name = "and", stack)]
     fn interpret_and(stack: &mut Stack) -> Result<()> {
-        let mut lhs = stack.pop()?.into_int()?;
-        let rhs = stack.pop()?.into_int()?;
+        let mut lhs = stack.pop_int()?;
+        let rhs = stack.pop_int()?;
         *lhs &= *rhs;
-        stack.push(lhs)
+        stack.push_raw(lhs)
     }
 
     #[cmd(name = "or", stack)]
     fn interpret_or(stack: &mut Stack) -> Result<()> {
-        let mut lhs = stack.pop()?.into_int()?;
-        let rhs = stack.pop()?.into_int()?;
+        let mut lhs = stack.pop_int()?;
+        let rhs = stack.pop_int()?;
         *lhs |= *rhs;
-        stack.push(lhs)
+        stack.push_raw(lhs)
     }
 
     #[cmd(name = "xor", stack)]
     fn interpret_xor(stack: &mut Stack) -> Result<()> {
-        let mut lhs = stack.pop()?.into_int()?;
-        let rhs = stack.pop()?.into_int()?;
+        let mut lhs = stack.pop_int()?;
+        let rhs = stack.pop_int()?;
         *lhs ^= *rhs;
-        stack.push(lhs)
+        stack.push_raw(lhs)
     }
 }

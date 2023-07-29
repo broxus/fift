@@ -2,7 +2,7 @@ use dyn_clone::DynClone;
 use everscale_types::cell::OwnedCellSlice;
 use everscale_types::prelude::*;
 use num_bigint::BigInt;
-use num_traits::{ToPrimitive, Zero};
+use num_traits::{Signed, ToPrimitive};
 
 use super::cont::*;
 use crate::error::*;
@@ -51,7 +51,11 @@ impl Stack {
         Ok(())
     }
 
-    pub fn push(&mut self, item: Box<dyn StackValue>) -> Result<()> {
+    pub fn push<T: StackValue + 'static>(&mut self, item: T) -> Result<()> {
+        self.push_raw(Box::new(item))
+    }
+
+    pub fn push_raw(&mut self, item: Box<dyn StackValue>) -> Result<()> {
         if let Some(capacity) = &mut self.capacity {
             if self.items.len() >= *capacity {
                 return Err(Error::StackOverflow);
@@ -63,16 +67,16 @@ impl Stack {
     }
 
     pub fn push_bool(&mut self, value: bool) -> Result<()> {
-        self.push(Box::new(BigInt::from(if value { -1i8 } else { 0i8 })))
+        self.push(BigInt::from(if value { -1i8 } else { 0i8 }))
     }
 
-    pub fn push_smallint(&mut self, value: u32) -> Result<()> {
-        self.push(Box::new(BigInt::from(value)))
+    pub fn push_int<T: Into<BigInt>>(&mut self, value: T) -> Result<()> {
+        self.push(value.into())
     }
 
     pub fn push_argcount(&mut self, args: u32, cont: Cont) -> Result<()> {
-        self.push(Box::new(BigInt::from(args)))?;
-        self.push(Box::new(cont))
+        self.push_int(args)?;
+        self.push(cont)
     }
 
     pub fn pop(&mut self) -> Result<Box<dyn StackValue>> {
@@ -80,13 +84,12 @@ impl Stack {
     }
 
     pub fn pop_bool(&mut self) -> Result<bool> {
-        // TODO: use custom strange bool and different cast to bool
-        let item = self.pop()?.into_int()?;
-        Ok(!item.is_zero())
+        let item = self.pop_int()?;
+        Ok(!item.is_negative())
     }
 
     pub fn pop_smallint_range(&mut self, min: u32, max: u32) -> Result<u32> {
-        let item = self.pop()?.into_int()?;
+        let item = self.pop_int()?;
         if let Some(item) = item.as_ref().to_u32() {
             if item <= max && item >= min {
                 return Ok(item);
@@ -99,8 +102,36 @@ impl Stack {
         char::from_u32(self.pop_smallint_range(0, char::MAX as u32)?).ok_or(Error::InvalidChar)
     }
 
+    pub fn pop_int(&mut self) -> Result<Box<BigInt>> {
+        self.pop()?.into_int()
+    }
+
+    pub fn pop_string(&mut self) -> Result<Box<String>> {
+        self.pop()?.into_string()
+    }
+
+    pub fn pop_bytes(&mut self) -> Result<Box<Vec<u8>>> {
+        self.pop()?.into_bytes()
+    }
+
+    pub fn pop_cell(&mut self) -> Result<Box<Cell>> {
+        self.pop()?.into_cell()
+    }
+
+    pub fn pop_builder(&mut self) -> Result<Box<CellBuilder>> {
+        self.pop()?.into_builder()
+    }
+
+    pub fn pop_slice(&mut self) -> Result<Box<OwnedCellSlice>> {
+        self.pop()?.into_slice()
+    }
+
+    pub fn pop_cont(&mut self) -> Result<Box<Cont>> {
+        self.pop()?.into_cont()
+    }
+
     pub fn pop_argcount(&mut self) -> Result<Cont> {
-        let cont = self.pop()?.into_cont()?;
+        let cont = self.pop_cont()?;
         let count = self.pop_smallint_range(0, 255)? as usize;
         self.check_underflow(count)?;
         Ok(*cont)
