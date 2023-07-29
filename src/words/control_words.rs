@@ -19,6 +19,8 @@ pub fn init(d: &mut Dictionary) -> FiftResult<()> {
         // Compiler control
         @act "[" => interpret_internal_interpret_begin,
         @act "]" => interpret_internal_interpret_end,
+        @act "{" => interpret_wordlist_begin,
+        @act "}" => interpret_wordlist_end,
         @ctx "(compile)" => interpret_compile_internal,
         @ctl "(execute)" => interpret_execute_internal,
         @act "'" => interpret_tick,
@@ -123,6 +125,18 @@ fn interpret_internal_interpret_end(ctx: &mut Context) -> FiftResult<()> {
     ctx.stack.push(Box::new(ctx.dictionary.make_nop()))
 }
 
+fn interpret_wordlist_begin(ctx: &mut Context) -> FiftResult<()> {
+    ctx.state.begin_compile()?;
+
+    // TODO
+    Ok(())
+}
+
+fn interpret_wordlist_end(ctx: &mut Context) -> FiftResult<()> {
+    // TODO
+    ctx.state.end_compile()
+}
+
 fn interpret_compile_internal(ctx: &mut Context) -> FiftResult<()> {
     ctx.stack.pop_compile()
 }
@@ -134,7 +148,7 @@ fn interpret_execute_internal(ctx: &mut Context) -> FiftResult<Option<Continuati
 
 fn interpret_tick(ctx: &mut Context) -> FiftResult<()> {
     let word = ctx.input.scan_word()?.ok_or(FiftError::UnexpectedEof)?;
-    let entry = match ctx.dictionary.lookup(&word.data) {
+    let entry = match ctx.dictionary.lookup(word.data) {
         Some(entry) => entry,
         None => {
             let word = format!("{} ", word.data);

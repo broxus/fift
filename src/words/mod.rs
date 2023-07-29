@@ -31,6 +31,7 @@ mod cell_words;
 mod control_words;
 mod debug_words;
 mod stack_words;
+mod string_words;
 
 impl Context<'_> {
     pub fn init_common_words(&mut self) -> FiftResult<()> {
@@ -43,6 +44,7 @@ impl Context<'_> {
         debug_words::init(d)?;
         stack_words::init(d)?;
         arithmetic_words::init(d)?;
+        string_words::init(d)?;
         cell_words::init(d)?;
         control_words::init(d)?;
 

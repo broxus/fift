@@ -41,6 +41,31 @@ impl<'a> Lexer<'a> {
         }
     }
 
+    pub fn scan_word_until<P: Delimiter>(&mut self, mut p: P) -> FiftResult<Token<'_>> {
+        if (self.line.is_empty() || self.line_offset >= self.line.len()) && !self.read_line()? {
+            return Err(FiftError::UnexpectedEof);
+        }
+
+        let start = self.line_offset;
+
+        let mut found = false;
+        self.skip_until(|c| {
+            found |= p.delim(c);
+            found
+        });
+
+        let end = self.line_offset;
+
+        if found && end >= start {
+            self.skip_symbol();
+            Ok(Token {
+                data: &self.line[start..end],
+            })
+        } else {
+            Err(FiftError::UnexpectedEof)
+        }
+    }
+
     pub fn rewind(&mut self, offset: usize) {
         self.line_offset -= offset;
     }
@@ -49,17 +74,24 @@ impl<'a> Lexer<'a> {
         self.skip_while(char::is_whitespace)
     }
 
-    pub fn skip_until<P: Delimiter>(&mut self, p: P) {
-        self.skip_while(|c| !p.delim(c))
+    pub fn skip_until<P: Delimiter>(&mut self, mut p: P) {
+        self.skip_while(|c| !p.delim(c));
     }
 
-    pub fn skip_while<P: Delimiter>(&mut self, p: P) {
-        for c in self.line.chars().skip(self.line_offset) {
+    pub fn skip_symbol(&mut self) {
+        let mut first = true;
+        self.skip_while(|_| std::mem::take(&mut first))
+    }
+
+    pub fn skip_while<P: Delimiter>(&mut self, mut p: P) {
+        let prev_offset = self.line_offset;
+        for (offset, c) in self.line[self.line_offset..].char_indices() {
             if !p.delim(c) {
+                self.line_offset = prev_offset + offset;
                 return;
             }
-            self.line_offset += 1;
         }
+        self.line_offset = self.line.len();
     }
 
     fn read_line(&mut self) -> FiftResult<bool> {
@@ -131,25 +163,26 @@ impl<'a> Iterator for Subtokens<'a> {
     type Item = &'a str;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let len = self.0.len().checked_sub(1)?;
-        self.0 = &self.0[..len];
-        Some(self.0)
+        let (i, _) = self.0.char_indices().next_back()?;
+        let res = self.0;
+        self.0 = &res[..i];
+        Some(res)
     }
 }
 
 pub trait Delimiter {
-    fn delim(&self, c: char) -> bool;
+    fn delim(&mut self, c: char) -> bool;
 }
 
-impl<T: Fn(char) -> bool> Delimiter for T {
-    fn delim(&self, c: char) -> bool {
+impl<T: FnMut(char) -> bool> Delimiter for T {
+    fn delim(&mut self, c: char) -> bool {
         (self)(c)
     }
 }
 
 impl Delimiter for char {
     #[inline]
-    fn delim(&self, c: char) -> bool {
+    fn delim(&mut self, c: char) -> bool {
         *self == c
     }
 }

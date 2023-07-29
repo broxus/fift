@@ -85,7 +85,7 @@ fn interpret_print_list(ctx: &mut Context) -> FiftResult<()> {
 
 fn interpret_print_backtrace(ctx: &mut Context) -> FiftResult<()> {
     if let Some(next) = &ctx.next {
-        write!(ctx.stdout, "{}\n", next.display_backtrace(&ctx.dictionary))?;
+        writeln!(ctx.stdout, "{}", next.display_backtrace(&ctx.dictionary))?;
         ctx.stdout.flush()?;
     }
     Ok(())
@@ -93,7 +93,7 @@ fn interpret_print_backtrace(ctx: &mut Context) -> FiftResult<()> {
 
 fn interpret_print_continuation(ctx: &mut Context) -> FiftResult<()> {
     let cont = ctx.stack.pop()?.into_cont()?;
-    write!(ctx.stdout, "{}\n", cont.display_backtrace(&ctx.dictionary))?;
+    writeln!(ctx.stdout, "{}", cont.display_backtrace(&ctx.dictionary))?;
     ctx.stdout.flush()?;
     Ok(())
 }
