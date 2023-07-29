@@ -62,6 +62,10 @@ impl Stack {
         Ok(())
     }
 
+    pub fn push_bool(&mut self, value: bool) -> Result<(), FiftError> {
+        self.push(Box::new(BigInt::from(if value { -1i8 } else { 0i8 })))
+    }
+
     pub fn push_smallint(&mut self, value: u32) -> FiftResult<()> {
         self.push(Box::new(BigInt::from(value)))
     }
@@ -89,6 +93,17 @@ impl Stack {
             }
         }
         Err(FiftError::ExpectedIntegerInRange)
+    }
+
+    pub fn pop_argcount(&mut self) -> FiftResult<Continuation> {
+        let cont = self.pop()?.into_cont()?;
+        let count = self.pop_smallint_range(0, 255)? as usize;
+        self.check_underflow(count)?;
+        Ok(*cont)
+    }
+
+    pub fn pop_compile(&mut self) -> FiftResult<()> {
+        todo!()
     }
 
     pub fn display_dump(&self) -> impl std::fmt::Display + '_ {

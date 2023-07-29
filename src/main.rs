@@ -8,7 +8,7 @@ fn main() -> Result<ExitCode, Box<dyn Error>> {
     let mut ctx = fift::Context::new(&mut stdin, &mut stdout);
     ctx.init_common_words()?;
 
-    let exit_code = ctx.interpret()?;
+    let exit_code = ctx.run()?;
 
     Ok(ExitCode::from(!exit_code))
 }

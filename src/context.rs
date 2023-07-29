@@ -32,31 +32,16 @@ impl<'a> Context<'a> {
         }
     }
 
-    pub fn interpret(&mut self) -> FiftResult<u8> {
-        self.run(Rc::new(InterpretCont))
-    }
-
-    pub fn run(&mut self, cont: Continuation) -> FiftResult<u8> {
-        let mut current = Some(cont);
+    pub fn run(&mut self) -> FiftResult<u8> {
+        let mut current = Some(Rc::new(InterpretCont) as Continuation);
         while let Some(cont) = current.take() {
-            current = cont.run_tail(self)?;
+            current = cont.run(self)?;
             if current.is_none() {
                 current = self.next.take();
             }
         }
 
         Ok(self.exit_code)
-    }
-
-    pub fn interpret_execute(&mut self) -> FiftResult<Option<Continuation>> {
-        let cont = self.stack.pop()?.into_cont()?;
-        let count = self.stack.pop_smallint_range(0, 255)? as usize;
-        self.stack.check_underflow(count)?;
-        Ok(Some(*cont))
-    }
-
-    pub fn interpret_compile(&mut self) -> FiftResult<()> {
-        todo!()
     }
 }
 

@@ -4,46 +4,87 @@ use std::rc::Rc;
 use num_bigint::BigInt;
 
 use crate::context::*;
+use crate::dictionary::*;
 use crate::error::*;
 use crate::stack::*;
 
 pub type Continuation = Rc<dyn ContinuationImpl>;
 
 pub trait ContinuationImpl {
-    fn run_tail(self: Rc<Self>, ctx: &mut Context) -> FiftResult<Option<Continuation>>;
+    fn run(self: Rc<Self>, ctx: &mut Context) -> FiftResult<Option<Continuation>>;
 
     fn up(&self) -> Option<&Continuation> {
         None
     }
 
-    fn write_name(&self, ctx: &Context, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result;
+    fn write_name(&self, d: &Dictionary, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result;
 
-    fn dump(&self, ctx: &Context, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        self.write_name(ctx, f)
+    fn dump(&self, d: &Dictionary, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.write_name(d, f)
     }
 }
 
-impl dyn ContinuationImpl {
-    pub fn display_dump<'a: 'b, 'b>(&'a self, ctx: &'a Context<'b>) -> impl std::fmt::Display + 'a {
-        struct DumpContinuation<'a, 'b> {
-            ctx: &'a Context<'b>,
+impl dyn ContinuationImpl + '_ {
+    pub fn display_backtrace<'a>(&'a self, d: &'a Dictionary) -> impl std::fmt::Display + 'a {
+        struct ContinuationBacktrace<'a> {
+            d: &'a Dictionary,
             cont: &'a dyn ContinuationImpl,
         }
 
-        impl std::fmt::Display for DumpContinuation<'_, '_> {
+        impl std::fmt::Display for ContinuationBacktrace<'_> {
             fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-                self.cont.dump(self.ctx, f)
+                let mut cont = self.cont;
+                let mut newline = "";
+                for i in 1..=16 {
+                    write!(f, "{newline}level {i}: {}", cont.display_dump(self.d))?;
+                    newline = "\n";
+                    match cont.up() {
+                        Some(next) => cont = next.as_ref(),
+                        None => return Ok(()),
+                    }
+                }
+                write!(f, "{newline}... more levels ...")
             }
         }
 
-        DumpContinuation { ctx, cont: self }
+        ContinuationBacktrace { d, cont: self }
+    }
+
+    pub fn display_name<'a>(&'a self, d: &'a Dictionary) -> impl std::fmt::Display + 'a {
+        struct ContinuationWriteName<'a> {
+            d: &'a Dictionary,
+            cont: &'a dyn ContinuationImpl,
+        }
+
+        impl std::fmt::Display for ContinuationWriteName<'_> {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                self.cont.write_name(self.d, f)
+            }
+        }
+
+        ContinuationWriteName { d, cont: self }
+    }
+
+    pub fn display_dump<'a>(&'a self, d: &'a Dictionary) -> impl std::fmt::Display + 'a {
+        struct ContinuationDump<'a> {
+            d: &'a Dictionary,
+            cont: &'a dyn ContinuationImpl,
+        }
+
+        impl std::fmt::Display for ContinuationDump<'_> {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                self.cont.dump(self.d, f)
+            }
+        }
+
+        ContinuationDump { d, cont: self }
     }
 }
 
 pub struct InterpretCont;
 
 impl ContinuationImpl for InterpretCont {
-    fn run_tail(self: Rc<Self>, ctx: &mut Context) -> FiftResult<Option<Continuation>> {
+    fn run(self: Rc<Self>, ctx: &mut Context) -> FiftResult<Option<Continuation>> {
         thread_local! {
             static COMPILE_EXECUTE: Continuation = Rc::new(CompileExecuteCont);
             static WORD: RefCell<String> = RefCell::new(String::with_capacity(128));
@@ -110,11 +151,7 @@ impl ContinuationImpl for InterpretCont {
         Ok(Some(compile_exec))
     }
 
-    fn up(&self) -> Option<&Continuation> {
-        None
-    }
-
-    fn write_name(&self, _: &Context, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn write_name(&self, _: &Dictionary, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str("<text interpreter continuation>")
     }
 }
@@ -122,33 +159,17 @@ impl ContinuationImpl for InterpretCont {
 pub struct CompileExecuteCont;
 
 impl ContinuationImpl for CompileExecuteCont {
-    fn run_tail(self: Rc<Self>, ctx: &mut Context) -> FiftResult<Option<Continuation>> {
-        if ctx.state.is_compile() {
-            ctx.interpret_compile()?;
-            Ok(None)
+    fn run(self: Rc<Self>, ctx: &mut Context) -> FiftResult<Option<Continuation>> {
+        Ok(if ctx.state.is_compile() {
+            ctx.stack.pop_compile()?;
+            None
         } else {
-            ctx.interpret_execute()
-        }
+            Some(ctx.stack.pop_argcount()?)
+        })
     }
 
-    fn write_name(&self, _: &Context, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn write_name(&self, _: &Dictionary, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str("<compile execute continuation>")
-    }
-}
-
-pub struct QuitCont {
-    pub exit_code: u8,
-}
-
-impl ContinuationImpl for QuitCont {
-    fn run_tail(self: Rc<Self>, ctx: &mut Context) -> FiftResult<Option<Continuation>> {
-        ctx.exit_code = self.exit_code;
-        ctx.next = None;
-        Ok(None)
-    }
-
-    fn write_name(&self, _: &Context, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "<quit {}>", self.exit_code)
     }
 }
 
@@ -168,7 +189,7 @@ impl SeqCont {
 }
 
 impl ContinuationImpl for SeqCont {
-    fn run_tail(mut self: Rc<Self>, ctx: &mut Context) -> FiftResult<Option<Continuation>> {
+    fn run(mut self: Rc<Self>, ctx: &mut Context) -> FiftResult<Option<Continuation>> {
         Ok(match Rc::get_mut(&mut self) {
             Some(this) => {
                 if ctx.next.is_none() {
@@ -192,19 +213,19 @@ impl ContinuationImpl for SeqCont {
         self.second.as_ref()
     }
 
-    fn write_name(&self, ctx: &Context, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn write_name(&self, d: &Dictionary, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str("seq: ")?;
         if let Some(first) = &self.first {
-            first.as_ref().write_name(ctx, f)
+            first.as_ref().write_name(d, f)
         } else {
             Ok(())
         }
     }
 
-    fn dump(&self, ctx: &Context, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn dump(&self, d: &Dictionary, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str("seq: ")?;
         if let Some(first) = &self.first {
-            first.as_ref().dump(ctx, f)?;
+            first.as_ref().dump(d, f)?;
         }
         Ok(())
     }
@@ -217,7 +238,7 @@ pub struct TimesCont {
 }
 
 impl ContinuationImpl for TimesCont {
-    fn run_tail(mut self: Rc<Self>, ctx: &mut Context) -> FiftResult<Option<Continuation>> {
+    fn run(mut self: Rc<Self>, ctx: &mut Context) -> FiftResult<Option<Continuation>> {
         Ok(match Rc::get_mut(&mut self) {
             Some(this) => {
                 ctx.insert_before_next(&mut this.after);
@@ -254,14 +275,14 @@ impl ContinuationImpl for TimesCont {
         self.after.as_ref()
     }
 
-    fn write_name(&self, _: &Context, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn write_name(&self, _: &Dictionary, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "<repeat {} times>", self.count)
     }
 
-    fn dump(&self, ctx: &Context, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn dump(&self, d: &Dictionary, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "<repeat {} times:> ", self.count)?;
         if let Some(body) = &self.body {
-            ContinuationImpl::dump(body.as_ref(), ctx, f)?;
+            ContinuationImpl::dump(body.as_ref(), d, f)?;
         }
         Ok(())
     }
@@ -273,7 +294,7 @@ pub struct UntilCont {
 }
 
 impl ContinuationImpl for UntilCont {
-    fn run_tail(mut self: Rc<Self>, ctx: &mut Context) -> FiftResult<Option<Continuation>> {
+    fn run(mut self: Rc<Self>, ctx: &mut Context) -> FiftResult<Option<Continuation>> {
         if ctx.stack.pop_bool()? {
             return Ok(match Rc::get_mut(&mut self) {
                 Some(this) => this.after.take(),
@@ -306,14 +327,14 @@ impl ContinuationImpl for UntilCont {
         self.after.as_ref()
     }
 
-    fn write_name(&self, _: &Context, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn write_name(&self, _: &Dictionary, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str("<until loop continuation>")
     }
 
-    fn dump(&self, ctx: &Context, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn dump(&self, d: &Dictionary, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str("<until loop continuation:> ")?;
         if let Some(body) = &self.body {
-            ContinuationImpl::dump(body.as_ref(), ctx, f)?;
+            ContinuationImpl::dump(body.as_ref(), d, f)?;
         }
         Ok(())
     }
@@ -337,7 +358,7 @@ impl WhileCont {
 }
 
 impl ContinuationImpl for WhileCont {
-    fn run_tail(mut self: Rc<Self>, ctx: &mut Context) -> FiftResult<Option<Continuation>> {
+    fn run(mut self: Rc<Self>, ctx: &mut Context) -> FiftResult<Option<Continuation>> {
         let cont = if self.running_body {
             if !ctx.stack.pop_bool()? {
                 return Ok(match Rc::get_mut(&mut self) {
@@ -373,11 +394,11 @@ impl ContinuationImpl for WhileCont {
         self.after.as_ref()
     }
 
-    fn write_name(&self, _: &Context, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn write_name(&self, _: &Dictionary, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "<while loop {}>", self.stage_name())
     }
 
-    fn dump(&self, ctx: &Context, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn dump(&self, d: &Dictionary, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "<while loop {}:>", self.stage_name())?;
         let stage = if self.running_body {
             self.body.as_ref()
@@ -385,7 +406,7 @@ impl ContinuationImpl for WhileCont {
             self.condition.as_ref()
         };
         if let Some(stage) = stage {
-            ContinuationImpl::dump(stage.as_ref(), ctx, f)?;
+            ContinuationImpl::dump(stage.as_ref(), d, f)?;
         }
         Ok(())
     }
@@ -400,7 +421,7 @@ impl From<i32> for IntLitCont {
 }
 
 impl ContinuationImpl for IntLitCont {
-    fn run_tail(self: Rc<Self>, ctx: &mut Context) -> FiftResult<Option<Continuation>> {
+    fn run(self: Rc<Self>, ctx: &mut Context) -> FiftResult<Option<Continuation>> {
         let value = match Rc::try_unwrap(self) {
             Ok(value) => value.0,
             Err(this) => this.0.clone(),
@@ -409,7 +430,7 @@ impl ContinuationImpl for IntLitCont {
         Ok(None)
     }
 
-    fn write_name(&self, _: &Context, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn write_name(&self, _: &Dictionary, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.0)
     }
 }
@@ -417,38 +438,38 @@ impl ContinuationImpl for IntLitCont {
 pub type ContextWordFunc = fn(&mut Context) -> FiftResult<()>;
 
 impl ContinuationImpl for ContextWordFunc {
-    fn run_tail(self: Rc<Self>, ctx: &mut Context) -> FiftResult<Option<Continuation>> {
+    fn run(self: Rc<Self>, ctx: &mut Context) -> FiftResult<Option<Continuation>> {
         (self)(ctx)?;
         Ok(None)
     }
 
-    fn write_name(&self, ctx: &Context, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        print_cont_name(self, ctx, f)
+    fn write_name(&self, d: &Dictionary, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        print_cont_name(self, d, f)
     }
 }
 
 pub type ContextTailWordFunc = fn(&mut Context) -> FiftResult<Option<Continuation>>;
 
 impl ContinuationImpl for ContextTailWordFunc {
-    fn run_tail(self: Rc<Self>, ctx: &mut Context) -> FiftResult<Option<Continuation>> {
+    fn run(self: Rc<Self>, ctx: &mut Context) -> FiftResult<Option<Continuation>> {
         (self)(ctx)
     }
 
-    fn write_name(&self, ctx: &Context, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        print_cont_name(self, ctx, f)
+    fn write_name(&self, d: &Dictionary, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        print_cont_name(self, d, f)
     }
 }
 
 pub type StackWordFunc = fn(&mut Stack) -> FiftResult<()>;
 
 impl ContinuationImpl for StackWordFunc {
-    fn run_tail(self: Rc<Self>, ctx: &mut Context) -> FiftResult<Option<Continuation>> {
+    fn run(self: Rc<Self>, ctx: &mut Context) -> FiftResult<Option<Continuation>> {
         (self)(&mut ctx.stack)?;
         Ok(None)
     }
 
-    fn write_name(&self, ctx: &Context, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        print_cont_name(self, ctx, f)
+    fn write_name(&self, d: &Dictionary, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        print_cont_name(self, d, f)
     }
 }
 
@@ -467,10 +488,10 @@ impl Context<'_> {
 
 fn print_cont_name(
     cont: &dyn ContinuationImpl,
-    ctx: &Context,
+    d: &Dictionary,
     f: &mut std::fmt::Formatter<'_>,
 ) -> std::fmt::Result {
-    if let Some(name) = ctx.dictionary.resolve_name(cont) {
+    if let Some(name) = d.resolve_name(cont) {
         f.write_str(name.trim_end())
     } else {
         write!(

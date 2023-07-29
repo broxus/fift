@@ -16,6 +16,8 @@ pub enum FiftError {
     InvalidNumber,
     #[error("Undefined word")]
     UndefinedWord,
+    #[error("Unexpected eof")]
+    UnexpectedEof,
 
     #[error("Stack underflow")]
     StackUnderflow,
