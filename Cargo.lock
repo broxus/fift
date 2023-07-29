@@ -169,12 +169,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "304e6508efa593091e97a9abbc10f90aa7ca635b6d2784feff3c89d41dd12272"
 
 [[package]]
-name = "either"
-version = "1.9.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a26ae43d7bcc3b814de94796a5e736d4029efb0ee900c12e2d54c993ad1a1e07"
-
-[[package]]
 name = "everscale-crypto"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -231,7 +225,6 @@ dependencies = [
  "everscale-types",
  "fift-proc",
  "hex",
- "itertools",
  "num-bigint",
  "num-traits",
  "thiserror",
@@ -243,7 +236,6 @@ name = "fift-proc"
 version = "0.1.0"
 dependencies = [
  "darling",
- "proc-macro2",
  "quote",
  "syn 2.0.27",
 ]
@@ -286,15 +278,6 @@ name = "ident_case"
 version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b9e0384b61958566e926dc50660321d12159025e767c18e043daf26b70104c39"
-
-[[package]]
-name = "itertools"
-version = "0.10.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b0fd2260e829bddf4cb6ea802289de2f86d6a7a690192fbe91b3f46e0f2c8473"
-dependencies = [
- "either",
-]
 
 [[package]]
 name = "libc"
