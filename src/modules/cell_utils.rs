@@ -68,8 +68,7 @@ impl CellUtils {
     fn interpret_store_str(stack: &mut Stack) -> Result<()> {
         let string = stack.pop_string()?;
         let mut builder = stack.pop_builder()?;
-        let bits = len_as_bits(&*string)?;
-        builder.store_raw(&string.as_bytes(), bits as u16)?;
+        builder.store_raw(string.as_bytes(), len_as_bits(&*string)?)?;
         stack.push_raw(builder)
     }
 
@@ -77,8 +76,7 @@ impl CellUtils {
     fn interpret_store_bytes(stack: &mut Stack) -> Result<()> {
         let bytes = stack.pop_bytes()?;
         let mut builder = stack.pop_builder()?;
-        let bits = len_as_bits(&*bytes)?;
-        builder.store_raw(bytes.as_slice(), bits as u16)?;
+        builder.store_raw(bytes.as_slice(), len_as_bits(&*bytes)?)?;
         stack.push_raw(builder)
     }
 
@@ -116,8 +114,7 @@ impl CellUtils {
     fn interpret_string_to_cellslice(stack: &mut Stack) -> Result<()> {
         let string = stack.pop_string()?;
         let mut builder = CellBuilder::new();
-        let bits = len_as_bits(&*string)?;
-        builder.store_raw(&string.as_bytes(), bits as u16)?;
+        builder.store_raw(string.as_bytes(), len_as_bits(&*string)?)?;
         let slice = OwnedCellSlice::new(builder.build()?)?;
         stack.push(slice)
     }

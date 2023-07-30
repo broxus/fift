@@ -8,7 +8,7 @@ pub use fift_proc::fift_module;
 pub use self::cont::{Cont, ContImpl};
 pub use self::dictionary::{Dictionary, DictionaryEntry};
 pub use self::lexer::{Lexer, Token};
-pub use self::stack::{Stack, StackTuple, StackValue, StackValueType};
+pub use self::stack::{Stack, StackTuple, StackValue, StackValueType, WordList};
 
 use crate::error::*;
 use crate::util::ImmediateInt;
@@ -61,6 +61,40 @@ impl<'a> Context<'a> {
         }
 
         Ok(self.exit_code)
+    }
+
+    pub(crate) fn execute_stack_top(&mut self) -> Result<Cont> {
+        let cont = self.stack.pop_cont()?;
+        let count = self.stack.pop_smallint_range(0, 255)? as usize;
+        self.stack.check_underflow(count)?;
+        Ok(*cont)
+    }
+
+    pub(crate) fn compile_stack_top(&mut self) -> Result<()> {
+        let word_def = self.stack.pop_cont()?;
+        let count = self.stack.pop_smallint_range(0, 255)? as usize;
+
+        let cont = match count {
+            0 => None,
+            1 => Some(Rc::new(cont::LitCont(self.stack.pop()?)) as Cont),
+            _ => {
+                let mut literals = Vec::with_capacity(count);
+                for _ in 0..count {
+                    literals.push(self.stack.pop()?);
+                }
+                literals.reverse();
+                Some(Rc::new(cont::MultiLitCont(literals)) as Cont)
+            }
+        };
+
+        let mut word_list = self.stack.pop_word_list()?;
+        word_list.items.extend(cont);
+
+        if !self.dictionary.is_nop(&**word_def) {
+            word_list.items.push(*word_def);
+        }
+
+        self.stack.push_raw(word_list)
     }
 }
 
@@ -216,10 +250,10 @@ struct CompileExecuteCont;
 impl ContImpl for CompileExecuteCont {
     fn run(self: Rc<Self>, ctx: &mut Context) -> Result<Option<Cont>> {
         Ok(if ctx.state.is_compile() {
-            ctx.stack.pop_compile()?;
+            ctx.compile_stack_top()?;
             None
         } else {
-            Some(ctx.stack.pop_argcount()?)
+            Some(ctx.execute_stack_top()?)
         })
     }
 

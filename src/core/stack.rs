@@ -1,3 +1,5 @@
+use std::rc::Rc;
+
 use dyn_clone::DynClone;
 use everscale_types::cell::OwnedCellSlice;
 use everscale_types::prelude::*;
@@ -136,19 +138,12 @@ impl Stack {
         self.pop()?.into_cont()
     }
 
-    pub fn pop_argcount(&mut self) -> Result<Cont> {
-        let cont = self.pop_cont()?;
-        let count = self.pop_smallint_range(0, 255)? as usize;
-        self.check_underflow(count)?;
-        Ok(*cont)
+    pub fn pop_word_list(&mut self) -> Result<Box<WordList>> {
+        self.pop()?.into_word_list()
     }
 
     pub fn pop_tuple(&mut self) -> Result<Box<StackTuple>> {
         self.pop()?.into_tuple()
-    }
-
-    pub fn pop_compile(&mut self) -> Result<()> {
-        todo!()
     }
 
     pub fn display_dump(&self) -> impl std::fmt::Display + '_ {
@@ -321,6 +316,18 @@ define_stack_value! {
             },
             as_cont(v): Cont = Ok(v),
             into_cont,
+        },
+        WordList(WordList) = {
+            dump(_v, f) = {
+                // f.write_str("{")?;
+                // for item in &self.items {
+                //     write!(f, " {}", item.display_name(d))?;
+                // }
+                // f.write_str("}")
+                f.write_str("WordList")
+            },
+            as_word_list(v): WordList = Ok(v),
+            into_word_list,
         }
     }
 }
@@ -415,3 +422,22 @@ impl dyn StackValue + '_ {
 }
 
 pub type StackTuple = Vec<Box<dyn StackValue>>;
+
+#[derive(Default, Clone)]
+pub struct WordList {
+    pub items: Vec<Cont>,
+}
+
+impl WordList {
+    pub fn finish(self) -> Cont {
+        if self.items.len() == 1 {
+            return self.items.into_iter().next().unwrap();
+        }
+
+        Rc::new(ListCont {
+            after: None,
+            list: Rc::new(self),
+            pos: 0,
+        })
+    }
+}

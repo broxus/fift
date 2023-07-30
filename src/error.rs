@@ -14,6 +14,8 @@ pub enum Error {
 
     #[error("Type redefenition")]
     TypeRedefenition,
+    #[error("Empty definition name")]
+    EmptyDefinitionName,
     #[error("Invalid number")]
     InvalidNumber,
     #[error("Invalid char")]
@@ -55,4 +57,6 @@ pub enum Error {
     ExpectedEmptySlice,
     #[error("Expected integer in the specified range")]
     ExpectedIntegerInRange,
+    #[error("Expected word list")]
+    ExpectedWordList,
 }

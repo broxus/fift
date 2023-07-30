@@ -23,7 +23,7 @@ impl<'a> Lexer<'a> {
                 return Ok(None);
             }
 
-            self.skip_whitespace();
+            self.skip_line_whitespace();
             let start = self.line_offset;
             self.skip_until(char::is_whitespace);
             let end = self.line_offset;
@@ -67,7 +67,20 @@ impl<'a> Lexer<'a> {
         self.line_offset -= offset;
     }
 
-    pub fn skip_whitespace(&mut self) {
+    pub fn skip_whitespace(&mut self) -> Result<()> {
+        loop {
+            if (self.line.is_empty() || self.line_offset >= self.line.len()) && !self.read_line()? {
+                return Ok(());
+            }
+
+            self.skip_line_whitespace();
+            if self.line_offset < self.line.len() {
+                return Ok(());
+            }
+        }
+    }
+
+    pub fn skip_line_whitespace(&mut self) {
         self.skip_while(char::is_whitespace)
     }
 

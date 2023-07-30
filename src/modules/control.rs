@@ -104,25 +104,37 @@ impl Control {
     #[cmd(name = "{", active)]
     fn interpret_wordlist_begin(ctx: &mut Context) -> Result<()> {
         ctx.state.begin_compile()?;
-
-        // TODO
+        interpret_wordlist_begin_aux(&mut ctx.stack)?;
+        ctx.stack.push_argcount(0, ctx.dictionary.make_nop())?;
         Ok(())
     }
 
     #[cmd(name = "}", active)]
     fn interpret_wordlist_end(ctx: &mut Context) -> Result<()> {
-        // TODO
-        ctx.state.end_compile()
+        ctx.state.end_compile()?;
+        interpret_wordlist_end_aux(ctx)?;
+        ctx.stack.push_argcount(1, ctx.dictionary.make_nop())
+    }
+
+    #[cmd(name = "({)", stack)]
+    fn interpret_wordlist_begin_aux(stack: &mut Stack) -> Result<()> {
+        stack.push(WordList::default())
+    }
+
+    #[cmd(name = "(})")]
+    fn interpret_wordlist_end_aux(ctx: &mut Context) -> Result<()> {
+        let word_list = ctx.stack.pop_word_list()?;
+        ctx.stack.push(word_list.finish())
     }
 
     #[cmd(name = "(compile)")]
     fn interpret_compile_internal(ctx: &mut Context) -> Result<()> {
-        ctx.stack.pop_compile()
+        ctx.compile_stack_top()
     }
 
     #[cmd(name = "(execute)", tail)]
     fn interpret_execute_internal(ctx: &mut Context) -> Result<Option<Cont>> {
-        let cont = ctx.stack.pop_argcount()?;
+        let cont = ctx.execute_stack_top()?;
         Ok(Some(cont))
     }
 
@@ -166,7 +178,64 @@ impl Control {
         }
     }
 
+    #[cmd(name = "create")]
+    fn interpret_create(ctx: &mut Context) -> Result<()> {
+        // NOTE: same as `:`, but not active
+        interpret_colon(ctx, false, false)
+    }
+
+    #[cmd(name = "(create)", args(mode = None))]
+    fn interpret_create_aux(ctx: &mut Context, mode: Option<DefMode>) -> Result<()> {
+        let mode = match mode {
+            Some(mode) => mode,
+            None => {
+                let flags = ctx.stack.pop_smallint_range(0, 3)?;
+                DefMode {
+                    active: flags & 0b01 != 0,
+                    prefix: flags & 0b10 != 0,
+                }
+            }
+        };
+        let word = ctx.stack.pop_string()?;
+        let cont = ctx.stack.pop_cont()?;
+        define_word(&mut ctx.dictionary, *word, *cont, mode)
+    }
+
+    #[cmd(name = ":", active, args(active = false, prefix = false))]
+    #[cmd(name = "::", active, args(active = true, prefix = false))]
+    #[cmd(name = ":_", active, args(active = false, prefix = true))]
+    #[cmd(name = "::_", active, args(active = true, prefix = true))]
+    fn interpret_colon(ctx: &mut Context, active: bool, prefix: bool) -> Result<()> {
+        let cont = ctx.stack.pop_cont()?;
+        let name = ctx.input.scan_word()?.ok_or(Error::UnexpectedEof)?;
+
+        define_word(
+            &mut ctx.dictionary,
+            name.data.to_owned(),
+            *cont,
+            DefMode { active, prefix },
+        )?;
+
+        ctx.stack.push_argcount(0, ctx.dictionary.make_nop())
+    }
+
     // === Input parse ===
+
+    #[cmd(name = "word")]
+    fn interpret_word(ctx: &mut Context) -> Result<()> {
+        let separator = ctx.stack.pop_smallint_char()?;
+        let word = if separator.is_whitespace() {
+            ctx.input.scan_word()?.ok_or(Error::UnexpectedEof)?
+        } else {
+            ctx.input.scan_word_until(separator)?
+        };
+        ctx.stack.push(word.data.to_owned())
+    }
+
+    #[cmd(name = "skipspc")]
+    fn interpret_skipspc(ctx: &mut Context) -> Result<()> {
+        ctx.input.skip_whitespace()
+    }
 
     #[cmd(name = "abort")]
     fn interpret_abort(ctx: &mut Context) -> Result<()> {
@@ -194,4 +263,27 @@ impl Control {
         ctx.next = None;
         Ok(())
     }
+}
+
+fn define_word(d: &mut Dictionary, mut word: String, cont: Cont, mode: DefMode) -> Result<()> {
+    if word.is_empty() {
+        return Err(Error::EmptyDefinitionName);
+    }
+    if !mode.prefix {
+        word.push(' ');
+    }
+    d.define_word(
+        word,
+        DictionaryEntry {
+            definition: cont,
+            active: mode.active,
+        },
+        true,
+    )
+}
+
+#[derive(Default)]
+struct DefMode {
+    active: bool,
+    prefix: bool,
 }

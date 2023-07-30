@@ -13,6 +13,7 @@ impl Arithmetic {
             d.define_word(
                 name,
                 DictionaryEntry::new_ordinary(Rc::new(cont::IntLitCont::from(value))),
+                false,
             )
         };
 

@@ -2,7 +2,7 @@ use std::rc::Rc;
 
 use num_bigint::BigInt;
 
-use super::{Context, Dictionary, Stack};
+use super::{Context, Dictionary, Stack, StackValue, WordList};
 
 use crate::error::*;
 
@@ -76,6 +76,60 @@ impl dyn ContImpl + '_ {
         }
 
         ContinuationDump { d, cont: self }
+    }
+}
+
+pub struct ListCont {
+    pub list: Rc<WordList>,
+    pub after: Option<Cont>,
+    pub pos: usize,
+}
+
+impl ContImpl for ListCont {
+    fn run(mut self: Rc<Self>, ctx: &mut Context) -> Result<Option<Cont>> {
+        let is_last = self.pos + 1 >= self.list.items.len();
+        let Some(current) = self.list.items.get(self.pos).cloned() else {
+            return Ok(ctx.next.take())
+        };
+
+        match Rc::get_mut(&mut self) {
+            Some(this) => {
+                ctx.insert_before_next(&mut this.after);
+                this.pos += 1;
+                ctx.next = if is_last {
+                    this.after.take()
+                } else {
+                    Some(self)
+                };
+            }
+            None => {
+                if let Some(next) = ctx.next.take() {
+                    ctx.next = Some(Rc::new(ListCont {
+                        after: SeqCont::make(self.after.clone(), Some(next)),
+                        list: self.list.clone(),
+                        pos: self.pos + 1,
+                    }))
+                } else if is_last {
+                    ctx.next = self.after.clone()
+                } else {
+                    ctx.next = Some(Rc::new(ListCont {
+                        after: self.after.clone(),
+                        list: self.list.clone(),
+                        pos: self.pos + 1,
+                    }))
+                }
+            }
+        }
+
+        Ok(Some(current))
+    }
+
+    fn up(&self) -> Option<&Cont> {
+        self.after.as_ref()
+    }
+
+    fn write_name(&self, d: &Dictionary, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        print_cont_name(self, d, f)
     }
 }
 
@@ -338,6 +392,56 @@ impl ContImpl for IntLitCont {
 
     fn write_name(&self, _: &Dictionary, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.0)
+    }
+}
+
+pub struct LitCont(pub Box<dyn StackValue>);
+
+impl ContImpl for LitCont {
+    fn run(self: Rc<Self>, ctx: &mut Context) -> Result<Option<Cont>> {
+        let value = match Rc::try_unwrap(self) {
+            Ok(value) => value.0,
+            Err(this) => this.0.clone(),
+        };
+        ctx.stack.push_raw(value)?;
+        Ok(None)
+    }
+
+    fn write_name(&self, _: &Dictionary, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0.display_dump())
+    }
+}
+
+pub struct MultiLitCont(pub Vec<Box<dyn StackValue>>);
+
+impl ContImpl for MultiLitCont {
+    fn run(self: Rc<Self>, ctx: &mut Context) -> Result<Option<Cont>> {
+        match Rc::try_unwrap(self) {
+            Ok(value) => {
+                for item in value.0 {
+                    ctx.stack.push_raw(item)?;
+                }
+            }
+            Err(this) => {
+                for item in &this.0 {
+                    ctx.stack.push_raw(item.clone())?;
+                }
+            }
+        };
+        Ok(None)
+    }
+
+    fn write_name(&self, _: &Dictionary, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut first = true;
+        for item in &self.0 {
+            if first {
+                first = false;
+            } else {
+                f.write_str(" ")?;
+            }
+            write!(f, "{}", item.display_dump())?;
+        }
+        Ok(())
     }
 }
 

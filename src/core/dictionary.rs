@@ -2,7 +2,6 @@ use std::collections::hash_map::{self, HashMap};
 use std::rc::Rc;
 
 use super::cont::{Cont, ContImpl, ContextTailWordFunc, ContextWordFunc, StackWordFunc};
-use super::stack::Stack;
 use crate::error::*;
 
 pub struct DictionaryEntry {
@@ -33,13 +32,25 @@ pub struct Dictionary {
 
 impl Default for Dictionary {
     fn default() -> Self {
-        fn interpret_nop(_: &mut Stack) -> Result<()> {
-            Ok(())
+        struct NopCont;
+
+        impl ContImpl for NopCont {
+            fn run(self: Rc<Self>, _: &mut crate::Context) -> Result<Option<Cont>> {
+                Ok(None)
+            }
+
+            fn write_name(
+                &self,
+                _: &Dictionary,
+                f: &mut std::fmt::Formatter<'_>,
+            ) -> std::fmt::Result {
+                f.write_str("<nop>")
+            }
         }
 
         Self {
             words: Default::default(),
-            nop: Rc::new(interpret_nop as StackWordFunc),
+            nop: Rc::new(NopCont),
         }
     }
 }
@@ -49,13 +60,23 @@ impl Dictionary {
         self.nop.clone()
     }
 
+    pub fn is_nop(&self, cont: &dyn ContImpl) -> bool {
+        let left = Rc::as_ptr(&self.nop) as *const ();
+        let right = cont as *const _ as *const ();
+        std::ptr::eq(left, right)
+    }
+
     pub fn lookup(&self, name: &str) -> Option<&DictionaryEntry> {
         self.words.get(name)
     }
 
     pub fn resolve_name(&self, definition: &dyn ContImpl) -> Option<&str> {
         for (name, entry) in &self.words {
-            if Rc::as_ptr(&entry.definition) == definition {
+            // NOTE: erase trait data from fat pointers
+            let left = Rc::as_ptr(&entry.definition) as *const ();
+            let right = definition as *const _ as *const ();
+            // Compare only the address part
+            if std::ptr::eq(left, right) {
                 return Some(name);
             }
         }
@@ -73,6 +94,7 @@ impl Dictionary {
                 definition: Rc::new(f),
                 active: false,
             },
+            false,
         )
     }
 
@@ -87,6 +109,7 @@ impl Dictionary {
                 definition: Rc::new(f),
                 active: false,
             },
+            false,
         )
     }
 
@@ -101,6 +124,7 @@ impl Dictionary {
                 definition: Rc::new(f),
                 active: true,
             },
+            false,
         )
     }
 
@@ -111,24 +135,35 @@ impl Dictionary {
                 definition: Rc::new(f),
                 active: false,
             },
+            false,
         )
     }
 
-    pub fn define_word<T: Into<String>>(&mut self, name: T, word: DictionaryEntry) -> Result<()> {
+    pub fn define_word<T: Into<String>>(
+        &mut self,
+        name: T,
+        word: DictionaryEntry,
+        allow_redefine: bool,
+    ) -> Result<()> {
         fn define_word_impl(
             words: &mut WordsMap,
             name: String,
             word: DictionaryEntry,
+            allow_redefine: bool,
         ) -> Result<()> {
             match words.entry(name) {
                 hash_map::Entry::Vacant(entry) => {
                     entry.insert(word);
                     Ok(())
                 }
-                hash_map::Entry::Occupied(_) => Err(Error::TypeRedefenition),
+                hash_map::Entry::Occupied(mut entry) if allow_redefine => {
+                    entry.insert(word);
+                    Ok(())
+                }
+                _ => Err(Error::TypeRedefenition),
             }
         }
-        define_word_impl(&mut self.words, name.into(), word)
+        define_word_impl(&mut self.words, name.into(), word, allow_redefine)
     }
 }
 
