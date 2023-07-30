@@ -29,10 +29,13 @@ impl FiftModule for BaseModule {
         stack.push(())
     }
 
-    #[cmd(name = "null?", stack)]
-    fn interpret_push_is_null(stack: &mut Stack) -> Result<()> {
-        let is_null = stack.pop()?.is_null();
-        stack.push_bool(is_null)
+    #[cmd(name = "null?", stack, args(ty = StackValueType::Null))]
+    #[cmd(name = "integer?", stack, args(ty = StackValueType::Int))]
+    #[cmd(name = "string?", stack, args(ty = StackValueType::String))]
+    #[cmd(name = "tuple?", stack, args(ty = StackValueType::Tuple))]
+    fn interpret_is_type(stack: &mut Stack, ty: StackValueType) -> Result<()> {
+        let is_ty = stack.pop()?.ty() == ty;
+        stack.push_bool(is_ty)
     }
 
     #[cmd(name = "|", stack)]
@@ -77,12 +80,6 @@ impl FiftModule for BaseModule {
     fn interpret_tuple_len(stack: &mut Stack) -> Result<()> {
         let len = stack.pop_tuple()?.len();
         stack.push_int(len)
-    }
-
-    #[cmd(name = "tuple?", stack)]
-    fn interpret_is_tuple(stack: &mut Stack) -> Result<()> {
-        let is_tuple = stack.pop()?.ty() == StackValueType::Tuple;
-        stack.push_bool(is_tuple)
     }
 
     #[cmd(name = "tuple", stack)]

@@ -60,12 +60,6 @@ impl StringUtils {
         Ok(())
     }
 
-    #[cmd(name = "string?", stack)]
-    fn interpret_is_string(stack: &mut Stack) -> Result<()> {
-        let is_string = stack.pop()?.ty() == StackValueType::String;
-        stack.push_bool(is_string)
-    }
-
     #[cmd(name = "chr", stack)]
     fn interpret_chr(stack: &mut Stack) -> Result<()> {
         let c = stack.pop_smallint_char()?;
@@ -148,11 +142,7 @@ impl StringUtils {
     fn interpret_str_cmp(stack: &mut Stack) -> Result<()> {
         let lhs = stack.pop_string()?;
         let rhs = stack.pop_string()?;
-        stack.push_int(match lhs.cmp(&rhs) {
-            std::cmp::Ordering::Less => -1,
-            std::cmp::Ordering::Equal => 0,
-            std::cmp::Ordering::Greater => 1,
-        })
+        stack.push_int(lhs.cmp(&rhs) as i8)
     }
 
     #[cmd(name = "$reverse", stack)]
@@ -272,10 +262,6 @@ impl StringUtils {
     fn interpret_bytes_cmp(stack: &mut Stack) -> Result<()> {
         let lhs = stack.pop_bytes()?;
         let rhs = stack.pop_bytes()?;
-        stack.push_int(match lhs.cmp(&rhs) {
-            std::cmp::Ordering::Less => -1,
-            std::cmp::Ordering::Equal => 0,
-            std::cmp::Ordering::Greater => 1,
-        })
+        stack.push_int(lhs.cmp(&rhs) as i8)
     }
 }

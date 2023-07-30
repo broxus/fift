@@ -1,5 +1,9 @@
 use std::rc::Rc;
 
+use num_bigint::{BigInt, Sign};
+use num_integer::Integer;
+use num_traits::{One, Signed, Zero};
+
 use crate::core::*;
 use crate::error::*;
 
@@ -26,48 +30,145 @@ impl Arithmetic {
         make_int_lit("bl ", 32)
     }
 
+    // === Basic ===
+
     #[cmd(name = "+", stack)]
     fn interpret_plus(stack: &mut Stack) -> Result<()> {
-        let mut lhs = stack.pop_int()?;
-        let rhs = stack.pop_int()?;
-        *lhs += *rhs;
-        stack.push_raw(lhs)
+        let y = stack.pop_int()?;
+        let mut x = stack.pop_int()?;
+        *x += *y;
+        stack.push_raw(x)
     }
 
     #[cmd(name = "-", stack)]
     fn interpret_minus(stack: &mut Stack) -> Result<()> {
-        let mut lhs = stack.pop_int()?;
-        let rhs = stack.pop_int()?;
-        *lhs -= *rhs;
-        stack.push_raw(lhs)
+        let y = stack.pop_int()?;
+        let mut x = stack.pop_int()?;
+        *x -= *y;
+        stack.push_raw(x)
     }
 
     #[cmd(name = "1+", stack, args(rhs = 1))]
     #[cmd(name = "1-", stack, args(rhs = -1))]
     #[cmd(name = "2+", stack, args(rhs = 2))]
     #[cmd(name = "2-", stack, args(rhs = -2))]
-    fn interpret_plus_imm(stack: &mut Stack, rhs: i32) -> Result<()> {
-        let mut lhs = stack.pop_int()?;
-        *lhs += rhs;
-        stack.push_raw(lhs)
+    fn interpret_plus_const(stack: &mut Stack, rhs: i32) -> Result<()> {
+        let mut x = stack.pop_int()?;
+        *x += rhs;
+        stack.push_raw(x)
     }
 
     #[cmd(name = "negate", stack)]
     fn interpret_negate(stack: &mut Stack) -> Result<()> {
-        let mut lhs = stack.pop_int()?;
-        *lhs = -std::mem::take(&mut lhs);
-        stack.push_raw(lhs)
+        let mut x = stack.pop_int()?;
+        *x = -std::mem::take(&mut x);
+        stack.push_raw(x)
     }
 
     #[cmd(name = "*", stack)]
     fn interpret_mul(stack: &mut Stack) -> Result<()> {
-        let mut lhs = stack.pop_int()?;
-        let rhs = stack.pop_int()?;
-        *lhs *= *rhs;
-        stack.push_raw(lhs)
+        let y = stack.pop_int()?;
+        let mut x = stack.pop_int()?;
+        *x *= *y;
+        stack.push_raw(x)
     }
 
-    // TODO: other
+    #[cmd(name = "/", stack, args(r = Rounding::Floor))]
+    #[cmd(name = "/r", stack, args(r = Rounding::Nearest))]
+    #[cmd(name = "/c", stack, args(r = Rounding::Ceil))]
+    fn interpret_div(stack: &mut Stack, r: Rounding) -> Result<()> {
+        let y = stack.pop_int()?;
+        let x = stack.pop_int()?;
+        stack.push(divmod(&x, &y, r).0)
+    }
+
+    #[cmd(name = "mod", stack, args(r = Rounding::Floor))]
+    #[cmd(name = "rmod", stack, args(r = Rounding::Nearest))]
+    #[cmd(name = "cmod", stack, args(r = Rounding::Ceil))]
+    fn interpret_mod(stack: &mut Stack, r: Rounding) -> Result<()> {
+        let y = stack.pop_int()?;
+        let x = stack.pop_int()?;
+        stack.push(divmod(&x, &y, r).1)
+    }
+
+    #[cmd(name = "/mod", stack, args(r = Rounding::Floor))]
+    #[cmd(name = "/rmod", stack, args(r = Rounding::Nearest))]
+    #[cmd(name = "/cmod", stack, args(r = Rounding::Ceil))]
+    fn interpret_divmod(stack: &mut Stack, r: Rounding) -> Result<()> {
+        let y = stack.pop_int()?;
+        let x = stack.pop_int()?;
+        let (q, r) = divmod(&x, &y, r);
+        stack.push(q)?;
+        stack.push(r)
+    }
+
+    #[cmd(name = "1<<", stack, args(negate = false, minus_one = false))]
+    #[cmd(name = "-1<<", stack, args(negate = true, minus_one = false))]
+    #[cmd(name = "1<<1-", stack, args(negate = false, minus_one = true))]
+    fn interpret_pow2(stack: &mut Stack, negate: bool, minus_one: bool) -> Result<()> {
+        let x = stack.pop_smallint_range(0, 255 + (negate || minus_one) as u32)? as u16;
+        let mut res = BigInt::one();
+        res <<= x;
+        if minus_one {
+            res -= 1;
+        }
+        if negate {
+            res = -res;
+        }
+        stack.push(res)
+    }
+
+    #[cmd(name = "%1<<", stack)]
+    fn interpret_mod_pow2(stack: &mut Stack) -> Result<()> {
+        let y = stack.pop_smallint_range(0, 256)? as u16;
+        let mut x = stack.pop_int()?;
+        let mut mask = BigInt::one();
+        mask <<= y;
+        mask -= 1;
+        *x &= mask;
+        stack.push_raw(x)
+    }
+
+    #[cmd(name = "<<", stack)]
+    fn interpret_lshift(stack: &mut Stack) -> Result<()> {
+        let y = stack.pop_smallint_range(0, 256)? as u16;
+        let mut x = stack.pop_int()?;
+        *x <<= y;
+        stack.push_raw(x)
+    }
+
+    #[cmd(name = ">>", stack, args(r = Rounding::Floor))]
+    #[cmd(name = ">>r", stack, args(r = Rounding::Nearest))]
+    #[cmd(name = ">>c", stack, args(r = Rounding::Ceil))]
+    fn interpret_rshift(stack: &mut Stack, r: Rounding) -> Result<()> {
+        let y = stack.pop_smallint_range(0, 256)? as u16;
+        let mut x = stack.pop_int()?;
+        match r {
+            Rounding::Floor => *x >>= y,
+            // TODO
+            Rounding::Nearest => unimplemented!(),
+            Rounding::Ceil => unimplemented!(),
+        }
+        stack.push_raw(x)
+    }
+
+    #[cmd(name = "2*", stack, args(y = 1))]
+    fn interpret_lshift_const(stack: &mut Stack, y: u8) -> Result<()> {
+        let mut x = stack.pop_int()?;
+        *x <<= y;
+        stack.push_raw(x)
+    }
+
+    #[cmd(name = "2/", stack, args(y = 1))]
+    fn interpret_rshift_const(stack: &mut Stack, y: u8) -> Result<()> {
+        let mut x = stack.pop_int()?;
+        *x >>= y;
+        stack.push_raw(x)
+    }
+
+    // TODO: mul shift, shift div
+
+    // === Logical ===
 
     #[cmd(name = "not", stack)]
     fn interpret_not(stack: &mut Stack) -> Result<()> {
@@ -98,5 +199,113 @@ impl Arithmetic {
         let rhs = stack.pop_int()?;
         *lhs ^= *rhs;
         stack.push_raw(lhs)
+    }
+
+    // === Integer comparison ===
+
+    #[cmd(name = "cmp", stack, args(map = [-1, 0, 1]))]
+    #[cmd(name = "=", stack, args(map = [0, -1, 0]))]
+    #[cmd(name = "<>", stack, args(map = [-1, 0, -1]))]
+    #[cmd(name = "<=", stack, args(map = [-1, -1, 0]))]
+    #[cmd(name = ">=", stack, args(map = [0, -1, -1]))]
+    #[cmd(name = "<", stack, args(map = [-1, 0, 0]))]
+    #[cmd(name = ">", stack, args(map = [0, 0, -1]))]
+    fn interpret_cmp(stack: &mut Stack, map: [i8; 3]) -> Result<()> {
+        let y = stack.pop_int()?;
+        let x = stack.pop_int()?;
+        let map_index = x.cmp(&y) as i8 + 1;
+        stack.push_int(map[map_index as usize])
+    }
+
+    #[cmd(name = "sgn", stack, args(map = [-1, 0, 1]))]
+    #[cmd(name = "0=", stack, args(map = [0, -1, 0]))]
+    #[cmd(name = "0<>", stack, args(map = [-1, 0, -1]))]
+    #[cmd(name = "0<=", stack, args(map = [-1, -1, 0]))]
+    #[cmd(name = "0>=", stack, args(map = [0, -1, -1]))]
+    #[cmd(name = "0<", stack, args(map = [-1, 0, 0]))]
+    #[cmd(name = "0>", stack, args(map = [0, 0, -1]))]
+    fn interpret_sgn(stack: &mut Stack, map: [i8; 3]) -> Result<()> {
+        let x = stack.pop_int()?;
+        let map_index = match x.sign() {
+            Sign::Minus => 0,
+            Sign::NoSign => 1,
+            Sign::Plus => 2,
+        };
+        stack.push_int(map[map_index as usize])
+    }
+
+    #[cmd(name = "fits", stack)] // TODO: what to do with sign bit?
+    #[cmd(name = "ufits", stack)]
+    fn interpret_fits(stack: &mut Stack) -> Result<()> {
+        let y = stack.pop_smallint_range(0, 1023)? as u16;
+        let x = stack.pop_int()?;
+        stack.push_bool(x.bits() <= y as u64)
+    }
+}
+
+enum Rounding {
+    Floor,
+    Nearest,
+    Ceil,
+}
+
+// Math code from:
+// https://github.com/tonlabs/ever-vm/blob/master/src/stack/integer/math.rs
+
+#[inline]
+fn divmod(lhs: &BigInt, rhs: &BigInt, rounding: Rounding) -> (BigInt, BigInt) {
+    match rounding {
+        Rounding::Floor => lhs.div_mod_floor(rhs),
+        Rounding::Nearest => {
+            let (mut q, mut r) = lhs.div_rem(rhs);
+            round_nearest(&mut q, &mut r, lhs, rhs);
+            (q, r)
+        }
+        Rounding::Ceil => {
+            let (mut q, mut r) = lhs.div_rem(rhs);
+            round_ceil(&mut q, &mut r, lhs, rhs);
+            (q, r)
+        }
+    }
+}
+
+#[inline]
+fn round_ceil(q: &mut BigInt, r: &mut BigInt, lhs: &BigInt, rhs: &BigInt) {
+    if r.is_zero() || r.sign() != rhs.sign() {
+        return;
+    }
+    *r -= rhs;
+    if lhs.sign() == rhs.sign() {
+        *q += 1;
+    } else {
+        *q -= 1;
+    }
+}
+
+#[inline]
+fn round_nearest(q: &mut BigInt, r: &mut BigInt, lhs: &BigInt, rhs: &BigInt) {
+    if r.is_zero() {
+        return;
+    }
+    //  5 / 2  ->   2,  1  ->   3, -1
+    // -5 / 2  ->  -2, -1  ->  -2, -1
+    //  5 /-2  ->  -2,  1  ->  -2,  1
+    // -5 /-2  ->   2, -1  ->   3,  1
+    let r_x2: BigInt = r.clone() << 1;
+    let cmp_result = r_x2.abs().cmp(&rhs.abs());
+    let is_not_negative = lhs.sign() == rhs.sign();
+    if cmp_result == std::cmp::Ordering::Greater
+        || (cmp_result == std::cmp::Ordering::Equal && is_not_negative)
+    {
+        if rhs.sign() == r.sign() {
+            *r -= rhs;
+        } else {
+            *r += rhs;
+        }
+        if is_not_negative {
+            *q += 1;
+        } else {
+            *q -= 1;
+        }
     }
 }

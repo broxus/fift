@@ -226,6 +226,7 @@ dependencies = [
  "fift-proc",
  "hex",
  "num-bigint",
+ "num-integer",
  "num-traits",
  "thiserror",
  "unicode-segmentation",
