@@ -10,7 +10,6 @@ impl DebugUtils {
     fn interpret_dot(ctx: &mut Context, space_after: bool) -> Result<()> {
         let int = ctx.stack.pop_int()?;
         write!(ctx.stdout, "{int}{}", opt_space(space_after))?;
-        ctx.stdout.flush()?;
         Ok(())
     }
 
@@ -26,7 +25,6 @@ impl DebugUtils {
         } else {
             write!(ctx.stdout, "{:x}{space}", int.as_ref())
         }?;
-        ctx.stdout.flush()?;
         Ok(())
     }
 
@@ -35,7 +33,6 @@ impl DebugUtils {
     fn interpret_dotbin(ctx: &mut Context, space_after: bool) -> Result<()> {
         let int = ctx.stack.pop_int()?;
         write!(ctx.stdout, "{:b}{}", int.as_ref(), opt_space(space_after))?;
-        ctx.stdout.flush()?;
         Ok(())
     }
 
@@ -49,21 +46,18 @@ impl DebugUtils {
             hex::encode_to_slice(chunk, buffer).unwrap();
             ctx.stdout.write_all(buffer)?;
         }
-        ctx.stdout.flush()?;
         Ok(())
     }
 
     #[cmd(name = ".s")]
     fn interpret_dotstack(ctx: &mut Context) -> Result<()> {
         writeln!(ctx.stdout, "{}", ctx.stack.display_dump())?;
-        ctx.stdout.flush()?;
         Ok(())
     }
 
     #[cmd(name = ".sl")]
     fn interpret_dotstack_list(ctx: &mut Context) -> Result<()> {
         writeln!(ctx.stdout, "{}", ctx.stack.display_list())?;
-        ctx.stdout.flush()?;
         Ok(())
     }
 
@@ -71,7 +65,6 @@ impl DebugUtils {
     fn interpret_dump(ctx: &mut Context) -> Result<()> {
         let item = ctx.stack.pop()?;
         write!(ctx.stdout, "{} ", item.display_dump())?;
-        ctx.stdout.flush()?;
         Ok(())
     }
 
@@ -79,7 +72,6 @@ impl DebugUtils {
     fn interpret_print_list(ctx: &mut Context) -> Result<()> {
         let item = ctx.stack.pop()?;
         write!(ctx.stdout, "{} ", item.display_list())?;
-        ctx.stdout.flush()?;
         Ok(())
     }
 
@@ -87,7 +79,6 @@ impl DebugUtils {
     fn interpret_print_backtrace(ctx: &mut Context) -> Result<()> {
         if let Some(next) = &ctx.next {
             writeln!(ctx.stdout, "{}", next.display_backtrace(&ctx.dictionary))?;
-            ctx.stdout.flush()?;
         }
         Ok(())
     }
@@ -96,7 +87,6 @@ impl DebugUtils {
     fn interpret_print_continuation(ctx: &mut Context) -> Result<()> {
         let cont = ctx.stack.pop_cont()?;
         writeln!(ctx.stdout, "{}", cont.display_backtrace(&ctx.dictionary))?;
-        ctx.stdout.flush()?;
         Ok(())
     }
 

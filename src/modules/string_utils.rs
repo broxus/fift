@@ -43,7 +43,6 @@ impl StringUtils {
     fn interpret_emit(ctx: &mut Context) -> Result<()> {
         let c = ctx.stack.pop_smallint_char()?;
         write!(ctx.stdout, "{c}")?;
-        ctx.stdout.flush()?;
         Ok(())
     }
 
@@ -51,7 +50,6 @@ impl StringUtils {
     #[cmd(name = "cr", args(c = '\n'))]
     fn interpret_emit_const(ctx: &mut Context, c: char) -> Result<()> {
         write!(ctx.stdout, "{c}")?;
-        ctx.stdout.flush()?;
         Ok(())
     }
 
@@ -59,7 +57,6 @@ impl StringUtils {
     fn interpret_type(ctx: &mut Context) -> Result<()> {
         let string = ctx.stack.pop_string()?;
         write!(ctx.stdout, "{string}")?;
-        ctx.stdout.flush()?;
         Ok(())
     }
 
@@ -123,7 +120,7 @@ impl StringUtils {
         let at = stack.pop_smallint_range(0, i32::MAX as _)? as usize;
         let mut head = stack.pop_string()?;
         if at > head.len() || !head.is_char_boundary(at) {
-            return Err(Error::InvalidIndex);
+            return Err(Error::IndexOutOfRange);
         }
         let tail = Box::new(head[at..].to_owned());
         head.truncate(at);
@@ -247,7 +244,7 @@ impl StringUtils {
         let at = stack.pop_smallint_range(0, i32::MAX as _)? as usize;
         let mut head = stack.pop_bytes()?;
         if at > head.len() {
-            return Err(Error::InvalidIndex);
+            return Err(Error::IndexOutOfRange);
         }
         let tail = Box::new(head[at..].to_owned());
         head.truncate(at);

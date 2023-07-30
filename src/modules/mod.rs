@@ -23,4 +23,105 @@ impl FiftModule for BaseModule {
     fn init(d: &mut Dictionary) -> Result<()> {
         d.define_word("nop", DictionaryEntry::new_ordinary(d.make_nop()))
     }
+
+    #[cmd(name = "null", stack)]
+    fn interpret_push_null(stack: &mut Stack) -> Result<()> {
+        stack.push(())
+    }
+
+    #[cmd(name = "null?", stack)]
+    fn interpret_push_is_null(stack: &mut Stack) -> Result<()> {
+        let is_null = stack.pop()?.is_null();
+        stack.push_bool(is_null)
+    }
+
+    #[cmd(name = "|", stack)]
+    fn interpret_empty_tuple(stack: &mut Stack) -> Result<()> {
+        stack.push(StackTuple::new())
+    }
+
+    #[cmd(name = ",", stack)]
+    fn interpret_tuple_push(stack: &mut Stack) -> Result<()> {
+        let value = stack.pop()?;
+        let mut tuple = stack.pop_tuple()?;
+        tuple.push(value);
+        stack.push_raw(tuple)
+    }
+
+    #[cmd(name = "tpop", stack)]
+    fn interpret_tuple_pop(stack: &mut Stack) -> Result<()> {
+        let mut tuple = stack.pop_tuple()?;
+        let last = tuple.pop().ok_or(Error::TupleUnderflow)?;
+        stack.push_raw(tuple)?;
+        stack.push_raw(last)
+    }
+
+    #[cmd(name = "[]", stack)]
+    fn interpret_tuple_index(stack: &mut Stack) -> Result<()> {
+        let idx = stack.pop_usize()?;
+        let tuple = stack.pop_tuple()?;
+        let value = tuple.get(idx).ok_or(Error::IndexOutOfRange)?;
+        stack.push_raw(dyn_clone::clone_box(value.as_ref()))
+    }
+
+    #[cmd(name = "[]=", stack)]
+    fn interpret_tuple_set(stack: &mut Stack) -> Result<()> {
+        let idx = stack.pop_usize()?;
+        let value = stack.pop()?;
+        let mut tuple = stack.pop_tuple()?;
+        *tuple.get_mut(idx).ok_or(Error::IndexOutOfRange)? = value;
+        stack.push_raw(tuple)
+    }
+
+    #[cmd(name = "count", stack)]
+    fn interpret_tuple_len(stack: &mut Stack) -> Result<()> {
+        let len = stack.pop_tuple()?.len();
+        stack.push_int(len)
+    }
+
+    #[cmd(name = "tuple?", stack)]
+    fn interpret_is_tuple(stack: &mut Stack) -> Result<()> {
+        let is_tuple = stack.pop()?.ty() == StackValueType::Tuple;
+        stack.push_bool(is_tuple)
+    }
+
+    #[cmd(name = "tuple", stack)]
+    fn interpret_make_tuple(stack: &mut Stack) -> Result<()> {
+        let n = stack.pop_smallint_range(0, 255)? as usize;
+        let mut tuple = Vec::with_capacity(n);
+        for _ in 0..n {
+            tuple.push(stack.pop()?);
+        }
+        tuple.reverse();
+        stack.push(tuple)
+    }
+
+    #[cmd(name = "untuple", stack, args(pop_count = true))]
+    #[cmd(name = "explode", stack, args(pop_count = false))]
+    fn interpret_tuple_explode(stack: &mut Stack, pop_count: bool) -> Result<()> {
+        let mut n = if pop_count {
+            stack.pop_smallint_range(0, 255)? as usize
+        } else {
+            0
+        };
+        let tuple = stack.pop_tuple()?;
+        if !pop_count {
+            n = tuple.len();
+            if n > 255 {
+                return Err(Error::TupleTooLarge);
+            }
+        } else if tuple.len() != n {
+            return Err(Error::TupleSizeMismatch);
+        }
+
+        for item in *tuple {
+            stack.push_raw(item)?;
+        }
+
+        if !pop_count {
+            stack.push_int(n)?;
+        }
+
+        Ok(())
+    }
 }

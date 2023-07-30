@@ -18,8 +18,8 @@ pub enum Error {
     InvalidChar,
     #[error("Invalid string")]
     InvalidString,
-    #[error("Invalid index")]
-    InvalidIndex,
+    #[error("Index out of range")]
+    IndexOutOfRange,
     #[error("Undefined word")]
     UndefinedWord,
     #[error("Unexpected eof")]
@@ -33,6 +33,12 @@ pub enum Error {
     InvalidType,
     #[error("Integer overflow")]
     IntegerOverflow,
+    #[error("Tuple underflow")]
+    TupleUnderflow,
+    #[error("Tuple too large")]
+    TupleTooLarge,
+    #[error("Tuple size mismatch")]
+    TupleSizeMismatch,
 
     #[error("Expected interpreter mode")]
     ExpectedInterpreterMode,

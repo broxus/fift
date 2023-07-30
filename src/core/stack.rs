@@ -90,12 +90,18 @@ impl Stack {
 
     pub fn pop_smallint_range(&mut self, min: u32, max: u32) -> Result<u32> {
         let item = self.pop_int()?;
-        if let Some(item) = item.as_ref().to_u32() {
+        if let Some(item) = item.to_u32() {
             if item <= max && item >= min {
                 return Ok(item);
             }
         }
         Err(Error::ExpectedIntegerInRange)
+    }
+
+    pub fn pop_usize(&mut self) -> Result<usize> {
+        self.pop_int()?
+            .to_usize()
+            .ok_or(Error::ExpectedIntegerInRange)
     }
 
     pub fn pop_smallint_char(&mut self) -> Result<char> {
@@ -135,6 +141,10 @@ impl Stack {
         let count = self.pop_smallint_range(0, 255)? as usize;
         self.check_underflow(count)?;
         Ok(*cont)
+    }
+
+    pub fn pop_tuple(&mut self) -> Result<Box<StackTuple>> {
+        self.pop()?.into_tuple()
     }
 
     pub fn pop_compile(&mut self) -> Result<()> {
@@ -291,11 +301,15 @@ define_stack_value! {
         },
         Tuple(StackTuple) = {
             dump(v, f) = {
-                f.write_str("[ ")?;
+                if v.is_empty() {
+                    return f.write_str("[]");
+                }
+                f.write_str("[")?;
                 for item in v {
+                    f.write_str(" ")?;
                     StackValue::dump(item.as_ref(), f)?;
                 }
-                f.write_str("]")
+                f.write_str(" ]")
             },
             as_tuple(v): StackTuple = Ok(v),
             into_tuple,

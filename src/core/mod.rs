@@ -8,7 +8,7 @@ pub use fift_proc::fift_module;
 pub use self::cont::{Cont, ContImpl};
 pub use self::dictionary::{Dictionary, DictionaryEntry};
 pub use self::lexer::{Lexer, Token};
-pub use self::stack::{Stack, StackValue, StackValueType};
+pub use self::stack::{Stack, StackTuple, StackValue, StackValueType};
 
 use crate::error::*;
 use crate::util::ImmediateInt;
@@ -142,6 +142,8 @@ impl ContImpl for InterpreterCont {
             static COMPILE_EXECUTE: Cont = Rc::new(CompileExecuteCont);
             static WORD: RefCell<String> = RefCell::new(String::with_capacity(128));
         };
+
+        ctx.stdout.flush()?;
 
         let compile_exec = COMPILE_EXECUTE.with(|c| c.clone());
 
