@@ -4,6 +4,8 @@ pub type Result<T> = std::result::Result<T, Error>;
 pub enum Error {
     #[error("Cell error")]
     CellError(#[from] everscale_types::error::Error),
+    #[error("Boc error")]
+    BocError(#[from] everscale_types::boc::de::Error),
     #[error("IO error")]
     IoError(#[from] std::io::Error),
 
