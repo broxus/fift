@@ -1,5 +1,6 @@
 use crate::core::*;
 use crate::error::*;
+use crate::util::cellslice_ptint_rec;
 
 pub struct DebugUtils;
 
@@ -33,6 +34,23 @@ impl DebugUtils {
     fn interpret_dotbin(ctx: &mut Context, space_after: bool) -> Result<()> {
         let int = ctx.stack.pop_int()?;
         write!(ctx.stdout, "{:b}{}", int.as_ref(), opt_space(space_after))?;
+        Ok(())
+    }
+
+    #[cmd(name = "csr.", args(pop_limit = false))]
+    #[cmd(name = "lcsr.", args(pop_limit = true))]
+    fn interpret_dot_cellslice_rec(ctx: &mut Context, pop_limit: bool) -> Result<()> {
+        const DEFAULT_RECURSIVE_PRINT_LIMIT: u16 = 100;
+
+        let limit = if pop_limit {
+            ctx.stack.pop_smallint_range(0, u16::MAX.into())? as u16
+        } else {
+            DEFAULT_RECURSIVE_PRINT_LIMIT
+        };
+
+        let cs = ctx.stack.pop()?;
+        cellslice_ptint_rec(ctx.stdout, cs.as_slice()?, 0, limit)?;
+
         Ok(())
     }
 

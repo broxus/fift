@@ -1,3 +1,6 @@
+use std::io::Write;
+
+use everscale_types::prelude::CellSlice;
 use num_bigint::BigInt;
 use num_traits::Num;
 use unicode_segmentation::UnicodeSegmentation;
@@ -80,4 +83,34 @@ pub fn reverse_utf8_string_inplace(s: &mut str) {
         // The string is now valid UTF-8 again.
         debug_assert!(std::str::from_utf8(v).is_ok());
     }
+}
+
+pub fn cellslice_ptint_rec(
+    out: &mut dyn Write,
+    cs: &CellSlice,
+    indent: usize,
+    limit: u16,
+) -> Result<bool> {
+    for _ in 0..indent {
+        write!(out, " ")?;
+    }
+
+    if limit == 0 {
+        write!(out, "<cell output limit reached>")?;
+        return Ok(false);
+    }
+
+    if cs.cell_type().is_exotic() {
+        write!(out, "SPECIAL ")?;
+    }
+
+    writeln!(out, "x{{{}}}", hex::encode(cs.cell().data()))?;
+
+    for r in cs.references() {
+        if !cellslice_ptint_rec(out, &r.as_slice()?, indent + 1, limit - 1)? {
+            return Ok(false);
+        }
+    }
+
+    Ok(true)
 }
