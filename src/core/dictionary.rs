@@ -165,6 +165,10 @@ impl Dictionary {
         }
         define_word_impl(&mut self.words, name.into(), word, allow_redefine)
     }
+
+    pub fn undefine_word(&mut self, name: &str) -> bool {
+        self.words.remove(name).is_some()
+    }
 }
 
 type WordsMap = HashMap<String, DictionaryEntry>;

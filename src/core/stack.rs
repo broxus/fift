@@ -69,11 +69,11 @@ impl Stack {
     }
 
     pub fn push_bool(&mut self, value: bool) -> Result<()> {
-        self.push(BigInt::from(if value {
+        self.push(if value {
             -BigInt::one()
         } else {
             BigInt::zero()
-        }))
+        })
     }
 
     pub fn push_int<T: Into<BigInt>>(&mut self, value: T) -> Result<()> {

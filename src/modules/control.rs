@@ -219,6 +219,27 @@ impl Control {
         ctx.stack.push_argcount(0, ctx.dictionary.make_nop())
     }
 
+    #[cmd(name = "forget", args(word_from_stack = false))]
+    #[cmd(name = "(forget)", args(word_from_stack = true))]
+    fn interpret_forget(ctx: &mut Context, word_from_stack: bool) -> Result<()> {
+        let mut word = if word_from_stack {
+            *ctx.stack.pop_string()?
+        } else {
+            let word = ctx.input.scan_word()?.ok_or(Error::UnexpectedEof)?;
+            word.data.to_owned()
+        };
+
+        if ctx.dictionary.lookup(&word).is_none() {
+            word.push(' ');
+            if ctx.dictionary.lookup(&word).is_none() {
+                return Err(Error::UndefinedWord);
+            }
+        }
+
+        ctx.dictionary.undefine_word(&word);
+        Ok(())
+    }
+
     // === Input parse ===
 
     #[cmd(name = "word")]

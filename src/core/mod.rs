@@ -26,6 +26,8 @@ pub struct Context<'a> {
     pub dictionary: Dictionary,
 
     pub input: Lexer<'a>,
+    pub clock: &'a dyn Clock,
+
     pub stdout: &'a mut dyn Write,
 }
 
@@ -38,6 +40,7 @@ impl<'a> Context<'a> {
             next: None,
             dictionary: Default::default(),
             input: Lexer::new(input),
+            clock: &SystemClock,
             stdout,
         }
     }
@@ -49,6 +52,15 @@ impl<'a> Context<'a> {
 
     pub fn add_module<T: Module>(&mut self, module: T) -> Result<()> {
         module.init(&mut self.dictionary)
+    }
+
+    pub fn with_clock(mut self, clock: &'a dyn Clock) -> Self {
+        self.set_clock(clock);
+        self
+    }
+
+    pub fn set_clock(&mut self, clock: &'a dyn Clock) {
+        self.clock = clock;
     }
 
     pub fn run(&mut self) -> Result<u8> {
@@ -163,6 +175,21 @@ pub trait Module {
 impl<T: Module> Module for &T {
     fn init(&self, d: &mut Dictionary) -> Result<()> {
         T::init(self, d)
+    }
+}
+
+pub trait Clock {
+    fn now_ms(&self) -> u64;
+}
+
+struct SystemClock;
+
+impl Clock for SystemClock {
+    fn now_ms(&self) -> u64 {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as u64
     }
 }
 

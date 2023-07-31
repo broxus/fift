@@ -123,4 +123,14 @@ impl FiftModule for BaseModule {
 
         Ok(())
     }
+
+    #[cmd(name = "now")]
+    fn interpret_now(ctx: &mut Context) -> Result<()> {
+        ctx.stack.push_int(ctx.clock.now_ms() / 1000)
+    }
+
+    #[cmd(name = "now_ms")]
+    fn interpret_now_ms(ctx: &mut Context) -> Result<()> {
+        ctx.stack.push_int(ctx.clock.now_ms())
+    }
 }
