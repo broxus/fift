@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use everscale_types::cell::{MAX_BIT_LEN, MAX_REF_COUNT};
 use everscale_types::prelude::*;
 use num_bigint::{BigInt, Sign};
@@ -375,7 +377,22 @@ impl CellUtils {
         Ok(())
     }
 
-    // TODO: totalcsize/totalssize
+    #[cmd(name = "totalcsize", stack, args(load_slice = false))]
+    #[cmd(name = "totalssize", stack, args(load_slice = true))]
+    fn interpret_cell_datasize(stack: &mut Stack, load_slice: bool) -> Result<()> {
+        const LIMIT: usize = 1 << 22;
+        let (cells, bits, refs) = if load_slice {
+            let slice = stack.pop_slice()?;
+            StorageStat::compute_for_slice(slice.pin(), LIMIT)
+        } else {
+            let cell = stack.pop_cell()?;
+            StorageStat::compute_for_cell(&**cell, LIMIT)
+        }
+        .ok_or(Error::LimitExceeded)?;
+        stack.push_int(cells)?;
+        stack.push_int(bits)?;
+        stack.push_int(refs)
+    }
 
     // === BOC manipulation ===
 
@@ -443,6 +460,81 @@ impl CellUtils {
         let builder = decode_binary_bitstring(s.data)?.build()?;
         ctx.stack.push(OwnedCellSlice::new(builder)?)?;
         ctx.stack.push_argcount(1, ctx.dictionary.make_nop())
+    }
+}
+
+struct StorageStat<'a> {
+    visited: HashSet<&'a HashBytes, ahash::RandomState>,
+    cells: u64,
+    bits: u64,
+    refs: u64,
+    limit: usize,
+}
+
+impl<'a> StorageStat<'a> {
+    fn with_limit(limit: usize) -> Self {
+        Self {
+            visited: Default::default(),
+            cells: 0,
+            bits: 0,
+            refs: 0,
+            limit,
+        }
+    }
+
+    fn compute_for_slice<'b: 'a>(
+        slice: &'a CellSlice<'b>,
+        limit: usize,
+    ) -> Option<(u64, u64, u64)> {
+        let mut this = Self::with_limit(limit);
+        if this.add_slice(slice) {
+            Some((this.cells, this.bits, this.refs))
+        } else {
+            None
+        }
+    }
+
+    fn compute_for_cell(cell: &'a DynCell, limit: usize) -> Option<(u64, u64, u64)> {
+        let mut this = Self::with_limit(limit);
+        if this.add_cell(cell) {
+            Some((this.cells, this.bits, this.refs))
+        } else {
+            None
+        }
+    }
+
+    fn add_slice<'b: 'a>(&mut self, slice: &'a CellSlice<'b>) -> bool {
+        self.bits = self.bits.saturating_add(slice.remaining_bits() as u64);
+        self.refs = self.refs.saturating_add(slice.remaining_refs() as u64);
+
+        for cell in slice.references() {
+            if !self.add_cell(cell) {
+                return false;
+            }
+        }
+
+        true
+    }
+
+    fn add_cell(&mut self, cell: &'a DynCell) -> bool {
+        if !self.visited.insert(cell.repr_hash()) {
+            return false;
+        }
+        if self.cells >= self.limit as u64 {
+            return false;
+        }
+
+        self.cells += 1;
+        self.bits = self.bits.saturating_add(cell.bit_len() as u64);
+        self.refs = self.refs.saturating_add(cell.reference_count() as u64);
+
+        for cell in cell.references() {
+            if !self.add_cell(cell) {
+                return false;
+            }
+        }
+
+        true
     }
 }
 

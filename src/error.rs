@@ -53,6 +53,8 @@ pub enum Error {
     TupleTooLarge,
     #[error("Tuple size mismatch")]
     TupleSizeMismatch,
+    #[error("Limit exceeded")]
+    LimitExceeded,
 
     #[error("Expected interpreter mode")]
     ExpectedInterpreterMode,

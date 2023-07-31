@@ -53,7 +53,7 @@ impl DebugUtils {
         Ok(())
     }
 
-    #[cmd(name = "Bx._")]
+    #[cmd(name = "Bx.")]
     fn interpret_bytes_hex_print_raw(ctx: &mut Context) -> Result<()> {
         const CHUNK: usize = 16;
         let bytes = ctx.stack.pop_bytes()?;
