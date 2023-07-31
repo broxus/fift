@@ -1,5 +1,6 @@
-use num_bigint::BigInt;
+use num_bigint::{BigInt, Sign};
 use num_traits::Num;
+use sha2::Digest;
 
 use crate::core::*;
 use crate::error::*;
@@ -263,5 +264,33 @@ impl StringUtils {
         let lhs = stack.pop_bytes()?;
         let rhs = stack.pop_bytes()?;
         stack.push_int(lhs.cmp(&rhs) as i8)
+    }
+
+    // TODO: bytes <=> int
+
+    #[cmd(name = "Bhash", stack, args(as_uint = true))]
+    #[cmd(name = "Bhashu", stack, args(as_uint = true))]
+    #[cmd(name = "BhashB", stack, args(as_uint = false))]
+    fn interpret_bytes_hash(stack: &mut Stack, as_uint: bool) -> Result<()> {
+        let bytes = stack.pop_bytes()?;
+        let hash = sha2::Sha256::digest(*bytes);
+        if as_uint {
+            stack.push(BigInt::from_bytes_be(Sign::Plus, &hash))
+        } else {
+            stack.push(hash.to_vec())
+        }
+    }
+
+    #[cmd(name = "B>base64", stack)]
+    fn interpret_bytes_to_base64(stack: &mut Stack) -> Result<()> {
+        let bytes = stack.pop_bytes()?;
+        stack.push(encode_base64(*bytes))
+    }
+
+    #[cmd(name = "base64>B", stack)]
+    fn interpret_base64_to_bytes(stack: &mut Stack) -> Result<()> {
+        let string = stack.pop_string()?;
+        let bytes = decode_base64(*string).map_err(|_| Error::InvalidString)?;
+        stack.push(bytes)
     }
 }

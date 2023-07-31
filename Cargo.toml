@@ -12,6 +12,8 @@ license = "MIT OR Apache-2.0"
 members = ["proc"]
 
 [dependencies]
+ahash = "0.8"
+base64 = "0.21"
 dyn-clone = "1.0"
 hex = "0.4"
 num-bigint = "0.4"
@@ -19,6 +21,7 @@ num-integer = "0.1"
 num-traits = "0.2"
 thiserror = "1.0"
 unicode-segmentation = "1.0"
+sha2 = "0.10"
 
 #everscale-types = "0.1.0-rc.0"
 everscale-types = { git = "https://github.com/broxus/everscale-types.git" }

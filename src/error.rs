@@ -24,6 +24,8 @@ pub enum Error {
     InvalidString,
     #[error("Index out of range")]
     IndexOutOfRange,
+    #[error("Unsupported mode")]
+    UnsupportedMode,
     #[error("Undefined word")]
     UndefinedWord,
     #[error("Unexpected eof")]

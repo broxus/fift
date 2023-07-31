@@ -55,7 +55,7 @@ impl ImmediateInt {
     }
 }
 
-pub fn reverse_utf8_string_inplace(s: &mut str) {
+pub(crate) fn reverse_utf8_string_inplace(s: &mut str) {
     unsafe {
         let v = s.as_bytes_mut();
 
@@ -81,6 +81,26 @@ pub fn reverse_utf8_string_inplace(s: &mut str) {
         // The string is now valid UTF-8 again.
         debug_assert!(std::str::from_utf8(v).is_ok());
     }
+}
+
+#[inline]
+pub(crate) fn encode_base64<T: AsRef<[u8]>>(data: T) -> String {
+    use base64::Engine;
+    fn encode_base64_impl(data: &[u8]) -> String {
+        base64::engine::general_purpose::STANDARD.encode(data)
+    }
+    encode_base64_impl(data.as_ref())
+}
+
+#[inline]
+pub(crate) fn decode_base64<T: AsRef<[u8]>>(
+    data: T,
+) -> std::result::Result<Vec<u8>, base64::DecodeError> {
+    use base64::Engine;
+    fn decode_base64_impl(data: &[u8]) -> std::result::Result<Vec<u8>, base64::DecodeError> {
+        base64::engine::general_purpose::STANDARD.decode(data)
+    }
+    decode_base64_impl(data.as_ref())
 }
 
 pub trait DisplaySliceExt<'s> {
