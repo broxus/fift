@@ -22,6 +22,8 @@ pub enum Error {
     InvalidChar,
     #[error("Invalid string")]
     InvalidString,
+    #[error("Invalid bitstring")]
+    InvalidBitString,
     #[error("Index out of range")]
     IndexOutOfRange,
     #[error("Unsupported mode")]

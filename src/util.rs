@@ -1,3 +1,4 @@
+use everscale_types::cell::MAX_BIT_LEN;
 use everscale_types::prelude::*;
 use num_bigint::BigInt;
 use num_traits::Num;
@@ -190,4 +191,85 @@ fn append_tag(data: &mut [u8; 128], bit_len: u16) {
 
         *last_byte = (*last_byte & data_mask) | tag_mask;
     }
+}
+
+pub fn decode_hex_bitstring(s: &str) -> Result<CellBuilder> {
+    fn hex_char(c: u8) -> Result<u8> {
+        match c {
+            b'A'..=b'F' => Ok(c - b'A' + 10),
+            b'a'..=b'f' => Ok(c - b'a' + 10),
+            b'0'..=b'9' => Ok(c - b'0'),
+            _ => Err(Error::InvalidBitString),
+        }
+    }
+
+    if !s.is_ascii() {
+        return Err(Error::InvalidBitString);
+    }
+
+    let s = s.as_bytes();
+    let (mut s, with_tag) = match s.strip_suffix(b"_") {
+        Some(s) => (s, true),
+        None => (s, false),
+    };
+
+    let mut half_byte = None;
+    if s.len() % 2 != 0 {
+        if let Some((last, prefix)) = s.split_last() {
+            half_byte = Some(hex_char(*last)?);
+            s = prefix;
+        }
+    }
+
+    if s.len() > 128 * 2 {
+        return Err(Error::InvalidBitString);
+    }
+
+    let mut builder = CellBuilder::new();
+
+    let mut bytes = hex::decode(s).map_err(|_| Error::InvalidBitString)?;
+
+    let mut bits = bytes.len() as u16 * 8;
+    if let Some(half_byte) = half_byte {
+        bits += 4;
+        bytes.push(half_byte << 4);
+    }
+
+    if with_tag {
+        bits = bytes.len() as u16 * 8;
+        for byte in bytes.iter().rev() {
+            if *byte == 0 {
+                bits -= 8;
+            } else {
+                bits -= 1 + byte.trailing_zeros() as u16;
+                break;
+            }
+        }
+    }
+
+    builder.store_raw(&bytes, bits)?;
+    Ok(builder)
+}
+
+pub fn decode_binary_bitstring(s: &str) -> Result<CellBuilder> {
+    let mut bits = 0;
+    let mut buffer = [0; 128];
+
+    for char in s.as_bytes() {
+        let value = match char {
+            b'0' => 0u8,
+            b'1' => 1,
+            _ => return Err(Error::InvalidBitString),
+        };
+        buffer[bits / 8] |= value << (7 - bits % 8);
+
+        bits += 1;
+        if bits > MAX_BIT_LEN as usize {
+            return Err(Error::InvalidBitString);
+        }
+    }
+
+    let mut builder = CellBuilder::new();
+    builder.store_raw(&buffer, bits as u16)?;
+    Ok(builder)
 }

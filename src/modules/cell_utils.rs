@@ -426,6 +426,24 @@ impl CellUtils {
             stack.push(result)
         }
     }
+
+    // === Prefix commands ===
+
+    #[cmd(name = "x{", active, without_space)]
+    fn interpret_bitstring_hex_literal(ctx: &mut Context) -> Result<()> {
+        let s = ctx.input.scan_word_until('}')?;
+        let builder = decode_hex_bitstring(s.data)?.build()?;
+        ctx.stack.push(OwnedCellSlice::new(builder)?)?;
+        ctx.stack.push_argcount(1, ctx.dictionary.make_nop())
+    }
+
+    #[cmd(name = "b{", active, without_space)]
+    fn interpret_bitstring_binary_literal(ctx: &mut Context) -> Result<()> {
+        let s = ctx.input.scan_word_until('}')?;
+        let builder = decode_binary_bitstring(s.data)?.build()?;
+        ctx.stack.push(OwnedCellSlice::new(builder)?)?;
+        ctx.stack.push_argcount(1, ctx.dictionary.make_nop())
+    }
 }
 
 fn len_as_bits<T: AsRef<[u8]>>(data: T) -> Result<u16> {
