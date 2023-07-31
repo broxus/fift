@@ -31,6 +31,8 @@ pub struct Context<'a> {
     pub env: &'a mut dyn Environment,
 
     pub stdout: &'a mut dyn Write,
+
+    pub exit_interpret: SharedBox,
 }
 
 impl<'a> Context<'a> {
@@ -48,6 +50,7 @@ impl<'a> Context<'a> {
             input: Lexer::new(input),
             env,
             stdout,
+            exit_interpret: Default::default(),
         }
     }
 
@@ -243,7 +246,11 @@ impl ContImpl for InterpreterCont {
             }
         };
 
-        // TODO: update `exec_interpret`
+        ctx.exit_interpret.store(Box::new(
+            ctx.next
+                .clone()
+                .unwrap_or_else(|| ctx.dictionary.make_nop()),
+        ));
 
         ctx.next = SeqCont::make(Some(self), ctx.next.take());
         Ok(Some(compile_exec))

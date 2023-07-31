@@ -7,6 +7,18 @@ pub struct Control;
 
 #[fift_module]
 impl Control {
+    #[init]
+    fn init(d: &mut Dictionary) -> Result<()> {
+        d.define_word(
+            "'exit-interpret ",
+            DictionaryEntry {
+                definition: Rc::new(ExitInterpretCont),
+                active: false,
+            },
+            false,
+        )
+    }
+
     // === Execution control ===
 
     #[cmd(name = "execute", tail)]
@@ -262,6 +274,17 @@ impl Control {
         ctx.input.skip_whitespace()
     }
 
+    #[cmd(name = "skip-to-eof", tail)]
+    fn interpret_skip_source(ctx: &mut Context) -> Result<Option<Cont>> {
+        let cont = ctx.exit_interpret.fetch();
+        ctx.next = None;
+        Ok(if !cont.is_null() {
+            Some(*cont.into_cont()?)
+        } else {
+            None
+        })
+    }
+
     #[cmd(name = "abort")]
     fn interpret_abort(ctx: &mut Context) -> Result<()> {
         let _string = ctx.stack.pop_string()?;
@@ -311,4 +334,17 @@ fn define_word(d: &mut Dictionary, mut word: String, cont: Cont, mode: DefMode) 
 struct DefMode {
     active: bool,
     prefix: bool,
+}
+
+struct ExitInterpretCont;
+
+impl cont::ContImpl for ExitInterpretCont {
+    fn run(self: Rc<Self>, ctx: &mut Context) -> Result<Option<Cont>> {
+        ctx.stack.push(ctx.exit_interpret.clone())?;
+        Ok(None)
+    }
+
+    fn write_name(&self, _: &Dictionary, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("'exit-interpret")
+    }
 }
