@@ -30,6 +30,12 @@ pub enum Error {
     UndefinedWord,
     #[error("Unexpected eof")]
     UnexpectedEof,
+    #[error("Invalid key")]
+    InvalidSecretKey,
+    #[error("Invalid public key")]
+    InvalidPublicKey,
+    #[error("Invalid signature")]
+    InvalidSignature,
 
     #[error("Stack underflow")]
     StackUnderflow,

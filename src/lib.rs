@@ -16,6 +16,7 @@ impl Context<'_> {
             .with_module(Control)?
             .with_module(DebugUtils)?
             .with_module(StackUtils)?
-            .with_module(StringUtils)
+            .with_module(StringUtils)?
+            .with_module(Crypto)
     }
 }
