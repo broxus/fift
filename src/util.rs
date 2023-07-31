@@ -1,6 +1,4 @@
-use std::io::Write;
-
-use everscale_types::prelude::CellSlice;
+use everscale_types::prelude::*;
 use num_bigint::BigInt;
 use num_traits::Num;
 use unicode_segmentation::UnicodeSegmentation;
@@ -85,32 +83,91 @@ pub fn reverse_utf8_string_inplace(s: &mut str) {
     }
 }
 
-pub fn cellslice_ptint_rec(
-    out: &mut dyn Write,
-    cs: &CellSlice,
-    indent: usize,
-    limit: u16,
-) -> Result<bool> {
-    for _ in 0..indent {
-        write!(out, " ")?;
+pub trait DisplaySliceExt<'s> {
+    fn display_slice_tree<'a: 's>(&'a self, limit: usize) -> DisplayCellSlice<'a, 's>;
+
+    fn display_slice_data<'a: 's>(&'a self) -> DisplaySliceData<'a, 's>;
+}
+
+impl<'s> DisplaySliceExt<'s> for CellSlice<'s> {
+    fn display_slice_tree<'a: 's>(&'a self, limit: usize) -> DisplayCellSlice<'a, 's> {
+        DisplayCellSlice { slice: self, limit }
     }
 
-    if limit == 0 {
-        write!(out, "<cell output limit reached>")?;
-        return Ok(false);
+    fn display_slice_data<'a: 's>(&'a self) -> DisplaySliceData<'a, 's> {
+        DisplaySliceData(self)
     }
+}
 
-    if cs.cell_type().is_exotic() {
-        write!(out, "SPECIAL ")?;
-    }
+pub struct DisplayCellSlice<'a, 'b> {
+    slice: &'a CellSlice<'b>,
+    limit: usize,
+}
 
-    writeln!(out, "x{{{}}}", hex::encode(cs.cell().data()))?;
+impl std::fmt::Display for DisplayCellSlice<'_, '_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut stack = vec![(0, *self.slice)];
 
-    for r in cs.references() {
-        if !cellslice_ptint_rec(out, &r.as_slice()?, indent + 1, limit - 1)? {
-            return Ok(false);
+        let mut i = 0;
+        while let Some((indent, cs)) = stack.pop() {
+            i += 1;
+            if i > self.limit {
+                return f.write_str("<cell output limit reached>\n");
+            }
+
+            writeln!(f, "{:indent$}{}", "", DisplaySliceData(&cs))?;
+
+            for cell in cs.references().rev() {
+                // SAFETY: it is safe to print pruned branches
+                let cs = unsafe { cell.as_slice_unchecked() };
+                stack.push((indent + 1, cs));
+            }
         }
-    }
 
-    Ok(true)
+        Ok(())
+    }
+}
+
+pub struct DisplaySliceData<'a, 'b>(&'a CellSlice<'b>);
+
+impl std::fmt::Display for DisplaySliceData<'_, '_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut cs = *self.0;
+
+        if cs.cell_type().is_exotic() {
+            f.write_str("SPECIAL ")?;
+        }
+
+        let mut buffer: [u8; 128] = [0; 128];
+
+        let bits = cs.remaining_bits();
+        cs.load_raw(&mut buffer, bits)
+            .map_err(|_| std::fmt::Error)?;
+        append_tag(&mut buffer, bits);
+
+        let mut result = hex::encode(&buffer[..(bits as usize + 7) / 8]);
+        if bits % 8 <= 4 {
+            result.pop();
+        }
+        if bits % 4 != 0 {
+            result.push('_');
+        }
+
+        write!(f, "x{{{}}}", result)
+    }
+}
+
+fn append_tag(data: &mut [u8; 128], bit_len: u16) {
+    debug_assert!(bit_len < 1024);
+
+    let rem = bit_len % 8;
+    let last_byte = (bit_len / 8) as usize;
+    if rem > 0 {
+        let last_byte = &mut data[last_byte];
+
+        let tag_mask: u8 = 1 << (7 - rem);
+        let data_mask = !(tag_mask - 1);
+
+        *last_byte = (*last_byte & data_mask) | tag_mask;
+    }
 }

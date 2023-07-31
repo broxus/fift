@@ -84,7 +84,7 @@ impl CellUtils {
     fn interpret_store_cellslice(stack: &mut Stack) -> Result<()> {
         let slice = stack.pop_slice()?;
         let mut builder = stack.pop_builder()?;
-        builder.store_slice(OwnedCellSlice::as_ref(&slice))?;
+        builder.store_slice(slice.pin())?;
         stack.push_raw(builder)
     }
 
@@ -93,7 +93,7 @@ impl CellUtils {
         let slice = stack.pop_slice()?;
         let cell = {
             let mut builder = CellBuilder::new();
-            builder.store_slice(OwnedCellSlice::as_ref(&slice))?;
+            builder.store_slice(slice.pin())?;
             builder.build()?
         };
         let mut builder = stack.pop_builder()?;
@@ -129,7 +129,7 @@ impl CellUtils {
     #[cmd(name = ">s", stack)]
     fn interpret_cell_check_empty(stack: &mut Stack) -> Result<()> {
         let item = stack.pop_slice()?;
-        let item = item.as_ref().as_ref();
+        let item = item.pin();
         if !item.is_data_empty() || !item.is_refs_empty() {
             return Err(Error::ExpectedEmptySlice);
         }
@@ -155,6 +155,13 @@ impl CellUtils {
         let cell = stack.pop_cell()?;
         let string = Boc::encode_base64(*cell);
         stack.push(string)
+    }
+
+    #[cmd(name = "base64>boc", stack)]
+    fn interpret_boc_deserialize_base64(stack: &mut Stack) -> Result<()> {
+        let bytes = stack.pop_string()?;
+        let cell = Boc::decode_base64(*bytes)?;
+        stack.push(cell)
     }
 }
 

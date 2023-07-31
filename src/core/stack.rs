@@ -277,7 +277,7 @@ define_stack_value! {
                 // TODO: print slice data as hex
                 f.write_str("CS{_data_}")
             },
-            as_slice(v): CellSlice = Ok(v.as_ref()),
+            as_slice(v): CellSlice = Ok(v.pin()),
             into_slice,
         },
         String(String) = {

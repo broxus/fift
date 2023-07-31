@@ -1,6 +1,6 @@
 use crate::core::*;
 use crate::error::*;
-use crate::util::cellslice_ptint_rec;
+use crate::util::*;
 
 pub struct DebugUtils;
 
@@ -40,17 +40,16 @@ impl DebugUtils {
     #[cmd(name = "csr.", args(pop_limit = false))]
     #[cmd(name = "lcsr.", args(pop_limit = true))]
     fn interpret_dot_cellslice_rec(ctx: &mut Context, pop_limit: bool) -> Result<()> {
-        const DEFAULT_RECURSIVE_PRINT_LIMIT: u16 = 100;
+        const DEFAULT_RECURSIVE_PRINT_LIMIT: usize = 100;
 
         let limit = if pop_limit {
-            ctx.stack.pop_smallint_range(0, u16::MAX.into())? as u16
+            ctx.stack.pop_smallint_range(0, u16::MAX as u32)? as usize
         } else {
             DEFAULT_RECURSIVE_PRINT_LIMIT
         };
 
-        let cs = ctx.stack.pop()?;
-        cellslice_ptint_rec(ctx.stdout, cs.as_slice()?, 0, limit)?;
-
+        let cs = ctx.stack.pop_slice()?;
+        write!(ctx.stdout, "{}", cs.pin().display_slice_tree(limit))?;
         Ok(())
     }
 
