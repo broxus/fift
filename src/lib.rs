@@ -1,11 +1,13 @@
 extern crate self as fift;
 
 pub use self::core::Context;
+pub use self::error::{Error, Result};
 
 pub mod core;
-pub mod error;
 pub mod modules;
 pub mod util;
+
+mod error;
 
 impl Context<'_> {
     pub fn with_basic_modules(self) -> error::Result<Self> {

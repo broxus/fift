@@ -126,11 +126,31 @@ impl FiftModule for BaseModule {
 
     #[cmd(name = "now")]
     fn interpret_now(ctx: &mut Context) -> Result<()> {
-        ctx.stack.push_int(ctx.clock.now_ms() / 1000)
+        ctx.stack.push_int(ctx.env.now_ms() / 1000)
     }
 
     #[cmd(name = "now_ms")]
     fn interpret_now_ms(ctx: &mut Context) -> Result<()> {
-        ctx.stack.push_int(ctx.clock.now_ms())
+        ctx.stack.push_int(ctx.env.now_ms())
+    }
+
+    #[cmd(name = "getenv")]
+    fn interpret_getenv(ctx: &mut Context) -> Result<()> {
+        let name = ctx.stack.pop_string()?;
+        let value = ctx.env.get_env(&name).unwrap_or_default();
+        ctx.stack.push(value)
+    }
+
+    #[cmd(name = "getenv?")]
+    fn interpret_getenv_exists(ctx: &mut Context) -> Result<()> {
+        let name = ctx.stack.pop_string()?;
+        let exists = match ctx.env.get_env(&name) {
+            Some(value) => {
+                ctx.stack.push(value)?;
+                true
+            }
+            None => false,
+        };
+        ctx.stack.push_bool(exists)
     }
 }

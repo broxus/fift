@@ -8,6 +8,13 @@ rust-version = "1.70"
 include = ["src/**/*.rs", "LICENSE-*", "README.md"]
 license = "MIT OR Apache-2.0"
 
+[lib]
+name = "fift"
+
+[[bin]]
+name = "fift"
+path = "src/main.rs"
+
 [workspace]
 members = ["proc"]
 
