@@ -245,12 +245,16 @@ impl Control {
     #[cmd(name = "word")]
     fn interpret_word(ctx: &mut Context) -> Result<()> {
         let separator = ctx.stack.pop_smallint_char()?;
-        let word = if separator.is_whitespace() {
-            ctx.input.scan_word()?.ok_or(Error::UnexpectedEof)?
+        let token = if separator.is_whitespace() {
+            ctx.input.scan_word()?.ok_or(Error::UnexpectedEof)?.data
         } else {
-            ctx.input.scan_word_until(separator)?
+            match ctx.input.scan_word_until(separator) {
+                Ok(token) => token.data,
+                Err(Error::UnexpectedEof) if separator as u32 == 0 => "",
+                Err(e) => return Err(e),
+            }
         };
-        ctx.stack.push(word.data.to_owned())
+        ctx.stack.push(token.to_owned())
     }
 
     #[cmd(name = "skipspc")]
