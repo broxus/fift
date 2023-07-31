@@ -4,7 +4,7 @@ use dyn_clone::DynClone;
 use everscale_types::cell::OwnedCellSlice;
 use everscale_types::prelude::*;
 use num_bigint::BigInt;
-use num_traits::{Signed, ToPrimitive};
+use num_traits::{One, Signed, ToPrimitive, Zero};
 
 use super::cont::*;
 use crate::error::*;
@@ -69,7 +69,11 @@ impl Stack {
     }
 
     pub fn push_bool(&mut self, value: bool) -> Result<()> {
-        self.push(BigInt::from(if value { -1i8 } else { 0i8 }))
+        self.push(BigInt::from(if value {
+            -BigInt::one()
+        } else {
+            BigInt::zero()
+        }))
     }
 
     pub fn push_int<T: Into<BigInt>>(&mut self, value: T) -> Result<()> {
@@ -87,7 +91,7 @@ impl Stack {
 
     pub fn pop_bool(&mut self) -> Result<bool> {
         let item = self.pop_int()?;
-        Ok(!item.is_negative())
+        Ok(item.is_negative())
     }
 
     pub fn pop_smallint_range(&mut self, min: u32, max: u32) -> Result<u32> {
