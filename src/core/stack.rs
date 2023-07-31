@@ -1,3 +1,4 @@
+use std::cell::RefCell;
 use std::rc::Rc;
 
 use dyn_clone::DynClone;
@@ -148,6 +149,10 @@ impl Stack {
 
     pub fn pop_tuple(&mut self) -> Result<Box<StackTuple>> {
         self.pop()?.into_tuple()
+    }
+
+    pub fn pop_shared_box(&mut self) -> Result<Box<SharedBox>> {
+        self.pop()?.into_shared_box()
     }
 
     pub fn display_dump(&self) -> impl std::fmt::Display + '_ {
@@ -332,6 +337,13 @@ define_stack_value! {
             },
             as_word_list(v): WordList = Ok(v),
             into_word_list,
+        },
+        SharedBox(SharedBox) = {
+            dump(v, f) = {
+                write!(f, "Box{{{:?}}}", Rc::as_ptr(&v.value))
+            },
+            as_box(v): SharedBox = Ok(v),
+            into_shared_box,
         }
     }
 }
@@ -443,5 +455,32 @@ impl WordList {
             list: Rc::new(self),
             pos: 0,
         })
+    }
+}
+
+#[derive(Clone)]
+pub struct SharedBox {
+    value: Rc<RefCell<Box<dyn StackValue>>>,
+}
+
+impl Default for SharedBox {
+    fn default() -> Self {
+        Self::new(Box::new(()))
+    }
+}
+
+impl SharedBox {
+    pub fn new(value: Box<dyn StackValue>) -> Self {
+        Self {
+            value: Rc::new(RefCell::new(value)),
+        }
+    }
+
+    pub fn store(&self, value: Box<dyn StackValue>) {
+        *self.value.borrow_mut() = value;
+    }
+
+    pub fn fetch(&self) -> Box<dyn StackValue> {
+        self.value.borrow().clone()
     }
 }

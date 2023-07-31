@@ -40,6 +40,30 @@ impl FiftModule for BaseModule {
         stack.push_bool(is_ty)
     }
 
+    #[cmd(name = "hole", stack)]
+    fn interpret_hole(stack: &mut Stack) -> Result<()> {
+        stack.push(SharedBox::default())
+    }
+
+    #[cmd(name = "box", stack)]
+    fn interpret_box(stack: &mut Stack) -> Result<()> {
+        let value = stack.pop()?;
+        stack.push(SharedBox::new(value))
+    }
+
+    #[cmd(name = "@", stack)]
+    fn interpret_box_fetch(stack: &mut Stack) -> Result<()> {
+        let value = stack.pop_shared_box()?;
+        stack.push_raw(value.fetch())
+    }
+
+    #[cmd(name = "!", stack)]
+    fn interpret_box_store(stack: &mut Stack) -> Result<()> {
+        let value = stack.pop_shared_box()?;
+        value.store(stack.pop()?);
+        Ok(())
+    }
+
     #[cmd(name = "|", stack)]
     fn interpret_empty_tuple(stack: &mut Stack) -> Result<()> {
         stack.push(StackTuple::new())

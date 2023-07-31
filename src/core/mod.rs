@@ -9,7 +9,7 @@ pub use self::cont::{Cont, ContImpl};
 pub use self::dictionary::{Dictionary, DictionaryEntry};
 pub use self::env::Environment;
 pub use self::lexer::{Lexer, Token};
-pub use self::stack::{Stack, StackTuple, StackValue, StackValueType, WordList};
+pub use self::stack::{SharedBox, Stack, StackTuple, StackValue, StackValueType, WordList};
 
 use crate::error::*;
 use crate::util::ImmediateInt;
