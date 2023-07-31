@@ -56,7 +56,7 @@ impl CellUtils {
         stack.push_raw(builder)
     }
 
-    #[cmd(name = "ref", stack)]
+    #[cmd(name = "ref,", stack)]
     fn interpret_store_ref(stack: &mut Stack) -> Result<()> {
         let cell = stack.pop_cell()?;
         let mut builder = stack.pop_builder()?;
