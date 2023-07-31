@@ -39,14 +39,24 @@ impl fift::core::Environment for SystemEnvironment {
         reader.take(len).read_to_end(&mut result)?;
         Ok(result)
     }
+
+    fn include(&self, name: &str) -> fift::Result<fift::core::SourceBlock> {
+        let file = std::fs::File::open(name)?;
+        let buffer = std::io::BufReader::new(file);
+        Ok(fift::core::SourceBlock::new(name, buffer))
+    }
 }
 
 fn main() -> Result<ExitCode, Box<dyn Error>> {
     let mut env = SystemEnvironment;
-    let mut stdin = std::io::stdin().lock();
-    let mut stdout = std::io::stdout();
 
-    let mut ctx = fift::Context::new(&mut env, &mut stdin, &mut stdout).with_basic_modules()?;
+    let mut stdout = std::io::stdout();
+    let mut ctx = fift::Context::new(&mut env, &mut stdout)
+        .with_basic_modules()?
+        .with_source_block(fift::core::SourceBlock::new(
+            "<stdin>",
+            std::io::stdin().lock(),
+        ));
 
     let exit_code = ctx.run()?;
 

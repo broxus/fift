@@ -271,7 +271,16 @@ impl Control {
 
     #[cmd(name = "skipspc")]
     fn interpret_skipspc(ctx: &mut Context) -> Result<()> {
-        ctx.input.skip_whitespace()
+        ctx.input.scan_skip_whitespace()
+    }
+
+    #[cmd(name = "include", tail)]
+    fn interpret_include(ctx: &mut Context) -> Result<Option<Cont>> {
+        let name = ctx.stack.pop_string()?;
+        let source_block = ctx.env.include(&name)?;
+        ctx.input.push_source_block(source_block);
+        ctx.next = cont::SeqCont::make(Some(Rc::new(ExitSourceBlockCont)), ctx.next.take());
+        Ok(Some(Rc::new(cont::InterpreterCont)))
     }
 
     #[cmd(name = "skip-to-eof", tail)]
@@ -346,5 +355,18 @@ impl cont::ContImpl for ExitInterpretCont {
 
     fn write_name(&self, _: &Dictionary, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str("'exit-interpret")
+    }
+}
+
+struct ExitSourceBlockCont;
+
+impl cont::ContImpl for ExitSourceBlockCont {
+    fn run(self: Rc<Self>, ctx: &mut Context) -> Result<Option<Cont>> {
+        ctx.input.pop_source_block();
+        Ok(None)
+    }
+
+    fn write_name(&self, _: &Dictionary, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("<exit source block>")
     }
 }
