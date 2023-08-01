@@ -2,7 +2,7 @@
 name = "fift"
 description = "Rust implementation of the Fift esoteric language"
 repository = "https://github.com/broxus/fift"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2021"
 rust-version = "1.70"
 include = ["src/**/*.rs", "src/**/*.fif", "LICENSE-*", "README.md"]
@@ -15,7 +15,6 @@ name = "fift"
 members = ["proc", "cli"]
 
 [dependencies]
-argh = "0.1"
 ahash = "0.8"
 base64 = "0.21"
 dyn-clone = "1.0"
