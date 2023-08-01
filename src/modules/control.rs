@@ -193,7 +193,18 @@ impl Control {
     #[cmd(name = "create")]
     fn interpret_create(ctx: &mut Context) -> Result<()> {
         // NOTE: same as `:`, but not active
-        interpret_colon(ctx, false, false)
+        let cont = ctx.stack.pop_cont()?;
+        let name = ctx.input.scan_word()?.ok_or(Error::UnexpectedEof)?;
+
+        define_word(
+            &mut ctx.dictionary,
+            name.data.to_owned(),
+            *cont,
+            DefMode {
+                active: false,
+                prefix: false,
+            },
+        )
     }
 
     #[cmd(name = "(create)", args(mode = None))]
