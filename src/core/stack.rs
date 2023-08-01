@@ -6,7 +6,7 @@ use dyn_clone::DynClone;
 use everscale_types::cell::OwnedCellSlice;
 use everscale_types::prelude::*;
 use num_bigint::BigInt;
-use num_traits::{One, Signed, ToPrimitive, Zero};
+use num_traits::{One, ToPrimitive, Zero};
 
 use super::cont::*;
 
@@ -89,8 +89,7 @@ impl Stack {
     }
 
     pub fn pop_bool(&mut self) -> Result<bool> {
-        let item = self.pop_int()?;
-        Ok(item.is_negative())
+        Ok(!self.pop_int()?.is_zero())
     }
 
     pub fn pop_smallint_range(&mut self, min: u32, max: u32) -> Result<u32> {
