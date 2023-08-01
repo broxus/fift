@@ -4,7 +4,7 @@ use std::rc::Rc;
 use anyhow::Result;
 use num_bigint::BigInt;
 
-use super::{Context, Dictionary, Stack, StackValue, WordList};
+use super::{Context, Dictionary, Stack, StackValue, StackValueType, WordList};
 use crate::util::*;
 
 pub type Cont = Rc<dyn ContImpl>;
@@ -233,7 +233,27 @@ impl ContImpl for ListCont {
     }
 
     fn fmt_name(&self, d: &Dictionary, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write_cont_name(self, d, f)
+        if let Some(name) = d.resolve_name(self) {
+            write!(f, "[in {name}:] ")?;
+        }
+
+        let len = self.list.items.len();
+        let start = if self.pos >= 16 { self.pos - 16 } else { 0 };
+        let end = std::cmp::min(self.pos + 16, len);
+
+        if start > 0 {
+            f.write_str("... ")?;
+        }
+        for i in start..end {
+            if i == self.pos {
+                f.write_str("**HERE** ")?;
+            }
+            write!(f, "{} ", self.list.items[i].display_name(d))?;
+        }
+        if end < len {
+            f.write_str("...")?;
+        }
+        Ok(())
     }
 }
 
@@ -278,7 +298,6 @@ impl ContImpl for SeqCont {
     }
 
     fn fmt_name(&self, d: &Dictionary, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("seq: ")?;
         if let Some(first) = &self.first {
             first.as_ref().fmt_name(d, f)
         } else {
@@ -287,7 +306,6 @@ impl ContImpl for SeqCont {
     }
 
     fn fmt_dump(&self, d: &Dictionary, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("seq: ")?;
         if let Some(first) = &self.first {
             first.as_ref().fmt_dump(d, f)?;
         }
@@ -511,8 +529,8 @@ impl ContImpl for LitCont {
         Ok(None)
     }
 
-    fn fmt_name(&self, _: &Dictionary, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        self.0.fmt_dump(f)
+    fn fmt_name(&self, d: &Dictionary, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write_lit_cont_name(self.0.as_ref(), d, f)
     }
 }
 
@@ -535,7 +553,7 @@ impl ContImpl for MultiLitCont {
         Ok(None)
     }
 
-    fn fmt_name(&self, _: &Dictionary, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt_name(&self, d: &Dictionary, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let mut first = true;
         for item in &self.0 {
             if first {
@@ -543,7 +561,7 @@ impl ContImpl for MultiLitCont {
             } else {
                 f.write_str(" ")?;
             }
-            item.fmt_dump(f)?;
+            write_lit_cont_name(item.as_ref(), d, f)?;
         }
         Ok(())
     }
@@ -596,6 +614,26 @@ impl Context<'_> {
                 first: cont.take(),
                 second: Some(next),
             }));
+        }
+    }
+}
+
+fn write_lit_cont_name(
+    stack_entry: &dyn StackValue,
+    d: &Dictionary,
+    f: &mut std::fmt::Formatter<'_>,
+) -> std::fmt::Result {
+    let ty = stack_entry.ty();
+    match ty {
+        StackValueType::Int | StackValueType::String | StackValueType::Builder => {
+            stack_entry.fmt_dump(f)
+        }
+        _ => {
+            if let Ok(cont) = stack_entry.as_cont() {
+                write!(f, "{{ {} }}", cont.display_dump(d))
+            } else {
+                write!(f, "<literal of type {:?}>", ty)
+            }
         }
     }
 }
