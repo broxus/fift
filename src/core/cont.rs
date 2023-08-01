@@ -93,67 +93,72 @@ impl ContImpl for InterpreterCont {
 
         let compile_exec = COMPILE_EXECUTE.with(|c| c.clone());
 
-        'token: {
-            let mut rewind = 0;
-            let entry = 'entry: {
-                let Some(token) = ctx.input.scan_word()? else {
-                    return Ok(None);
-                };
+        'source_block: loop {
+            'token: {
+                let mut rewind = 0;
+                let entry = 'entry: {
+                    let Some(token) = ctx.input.scan_word()? else {
+                        if ctx.input.pop_source_block() {
+                            continue 'source_block;
+                        }
+                        return Ok(None);
+                    };
 
-                // Find the largest subtoken first
-                for subtoken in token.subtokens() {
-                    if let Some(entry) = ctx.dictionary.lookup(subtoken) {
-                        rewind = token.delta(subtoken);
+                    // Find the largest subtoken first
+                    for subtoken in token.subtokens() {
+                        if let Some(entry) = ctx.dictionary.lookup(subtoken) {
+                            rewind = token.delta(subtoken);
+                            break 'entry entry;
+                        }
+                    }
+
+                    // Find in predefined entries
+                    if let Some(entry) = WORD.with(|word| {
+                        let mut word = word.borrow_mut();
+                        word.clear();
+                        word.push_str(token.data);
+                        word.push(' ');
+                        ctx.dictionary.lookup(&word)
+                    }) {
                         break 'entry entry;
                     }
-                }
 
-                // Find in predefined entries
-                if let Some(entry) = WORD.with(|word| {
-                    let mut word = word.borrow_mut();
-                    word.clear();
-                    word.push_str(token.data);
-                    word.push(' ');
-                    ctx.dictionary.lookup(&word)
-                }) {
-                    break 'entry entry;
-                }
-
-                // Try parse as number
-                if let Some(value) = ImmediateInt::try_from_str(token.data)? {
-                    ctx.stack.push(value.num)?;
-                    if let Some(denom) = value.denom {
-                        ctx.stack.push(denom)?;
-                        ctx.stack.push_argcount(2, ctx.dictionary.make_nop())?;
-                    } else {
-                        ctx.stack.push_argcount(1, ctx.dictionary.make_nop())?;
+                    // Try parse as number
+                    if let Some(value) = ImmediateInt::try_from_str(token.data)? {
+                        ctx.stack.push(value.num)?;
+                        if let Some(denom) = value.denom {
+                            ctx.stack.push(denom)?;
+                            ctx.stack.push_argcount(2, ctx.dictionary.make_nop())?;
+                        } else {
+                            ctx.stack.push_argcount(1, ctx.dictionary.make_nop())?;
+                        }
+                        break 'token;
                     }
-                    break 'token;
+
+                    return Err(Error::UndefinedWord);
+                };
+                ctx.input.rewind(rewind);
+
+                if entry.active {
+                    ctx.next = SeqCont::make(
+                        Some(compile_exec),
+                        SeqCont::make(Some(self), ctx.next.take()),
+                    );
+                    return Ok(Some(entry.definition.clone()));
+                } else {
+                    ctx.stack.push_argcount(0, entry.definition.clone())?;
                 }
-
-                return Err(Error::UndefinedWord);
             };
-            ctx.input.rewind(rewind);
 
-            if entry.active {
-                ctx.next = SeqCont::make(
-                    Some(compile_exec),
-                    SeqCont::make(Some(self), ctx.next.take()),
-                );
-                return Ok(Some(entry.definition.clone()));
-            } else {
-                ctx.stack.push_argcount(0, entry.definition.clone())?;
-            }
-        };
+            ctx.exit_interpret.store(Box::new(
+                ctx.next
+                    .clone()
+                    .unwrap_or_else(|| ctx.dictionary.make_nop()),
+            ));
 
-        ctx.exit_interpret.store(Box::new(
-            ctx.next
-                .clone()
-                .unwrap_or_else(|| ctx.dictionary.make_nop()),
-        ));
-
-        ctx.next = SeqCont::make(Some(self), ctx.next.take());
-        Ok(Some(compile_exec))
+            ctx.next = SeqCont::make(Some(self), ctx.next.take());
+            break Ok(Some(compile_exec));
+        }
     }
 
     fn write_name(&self, _: &Dictionary, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
