@@ -13,6 +13,8 @@ name = "fift"
 path = "src/main.rs"
 
 [dependencies]
+anyhow = "1.0"
 argh = "0.1"
+rustyline = { version = "11.0", default-features = false }
 
 fift = { path = "..", version = "0.1.2" }
