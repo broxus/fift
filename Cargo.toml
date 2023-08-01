@@ -32,4 +32,4 @@ crc = "3.0"
 
 everscale-types = "0.1.0-rc.1"
 
-fift-proc = { path = "./proc" }
+fift-proc = { path = "./proc", version = "=0.1.0" }
