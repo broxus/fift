@@ -212,8 +212,9 @@ dependencies = [
 
 [[package]]
 name = "everscale-types"
-version = "0.1.0-rc.0"
-source = "git+https://github.com/broxus/everscale-types.git#a63a413f35bbb8c309fc9a1a2e80be988d24bb19"
+version = "0.1.0-rc.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c40c316f23bbd27f2055b3b9b288060ba027658f6cb6bb525a23d0b097122c8d"
 dependencies = [
  "ahash",
  "base64",
@@ -232,7 +233,8 @@ dependencies = [
 [[package]]
 name = "everscale-types-proc"
 version = "0.1.2"
-source = "git+https://github.com/broxus/everscale-types.git#a63a413f35bbb8c309fc9a1a2e80be988d24bb19"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b29e381cee2a89b49739f7e3174da14116cdfbee9855dd64558538cc2c4d73e3"
 dependencies = [
  "proc-macro2",
  "quote",

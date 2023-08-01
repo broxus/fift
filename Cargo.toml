@@ -30,7 +30,6 @@ thiserror = "1.0"
 unicode-segmentation = "1.0"
 crc = "3.0"
 
-#everscale-types = "0.1.0-rc.0"
-everscale-types = { git = "https://github.com/broxus/everscale-types.git" }
+everscale-types = "0.1.0-rc.1"
 
 fift-proc = { path = "./proc" }
