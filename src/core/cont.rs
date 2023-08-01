@@ -233,27 +233,41 @@ impl ContImpl for ListCont {
     }
 
     fn fmt_name(&self, d: &Dictionary, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        if let Some(name) = d.resolve_name(self) {
-            write!(f, "[in {name}:] ")?;
-        }
+        write_cont_name(self, d, f)
+    }
 
-        let len = self.list.items.len();
-        let start = if self.pos >= 16 { self.pos - 16 } else { 0 };
-        let end = std::cmp::min(self.pos + 16, len);
-
-        if start > 0 {
-            f.write_str("... ")?;
-        }
-        for i in start..end {
-            if i == self.pos {
-                f.write_str("**HERE** ")?;
+    fn fmt_dump(&self, d: &Dictionary, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if self.pos == 0 {
+            f.write_str("{")?;
+            for item in &self.list.items {
+                write!(f, " {}", item.display_name(d))?;
             }
-            write!(f, "{} ", self.list.items[i].display_name(d))?;
+            f.write_str(" }")
+        } else {
+            const N: usize = 16;
+
+            if let Some(name) = d.resolve_name(self) {
+                write!(f, "[in {name}:] ")?;
+            }
+
+            let len = self.list.items.len();
+            let start = if self.pos >= N { self.pos - N } else { 0 };
+            let items = self.list.items.iter();
+
+            if start > 0 {
+                f.write_str("... ")?;
+            }
+            for (i, item) in items.enumerate().skip(start).take(N) {
+                if i == self.pos {
+                    f.write_str("**HERE** ")?;
+                }
+                write!(f, "{} ", item.display_name(d))?;
+            }
+            if self.pos + N < len {
+                f.write_str("...")?;
+            }
+            Ok(())
         }
-        if end < len {
-            f.write_str("...")?;
-        }
-        Ok(())
     }
 }
 
@@ -610,10 +624,13 @@ impl ContImpl for StackWordFunc {
 impl Context<'_> {
     fn insert_before_next(&mut self, cont: &mut Option<Cont>) {
         if let Some(next) = self.next.take() {
-            *cont = Some(Rc::new(SeqCont {
-                first: cont.take(),
-                second: Some(next),
-            }));
+            *cont = match cont.take() {
+                Some(prev) => Some(Rc::new(SeqCont {
+                    first: Some(prev),
+                    second: Some(next),
+                })),
+                None => Some(next),
+            };
         }
     }
 }
