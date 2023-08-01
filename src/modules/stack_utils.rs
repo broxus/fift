@@ -1,7 +1,7 @@
+use anyhow::Result;
 use num_traits::Zero;
 
 use crate::core::*;
-use crate::error::*;
 
 pub struct StackUtils;
 

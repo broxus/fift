@@ -1,16 +1,16 @@
 extern crate self as fift;
 
+use anyhow::Result;
+
 pub use self::core::Context;
-pub use self::error::{Error, Result};
 
 pub mod core;
+pub mod error;
 pub mod modules;
 pub mod util;
 
-mod error;
-
 impl Context<'_> {
-    pub fn with_basic_modules(self) -> error::Result<Self> {
+    pub fn with_basic_modules(self) -> Result<Self> {
         use modules::*;
         self.with_module(BaseModule)?
             .with_module(Arithmetic)?

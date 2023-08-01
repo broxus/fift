@@ -1,5 +1,7 @@
+use anyhow::Result;
+
 use super::env::SourceBlock;
-use crate::error::*;
+use crate::error::UnexpectedEof;
 
 #[derive(Default)]
 pub struct Lexer {
@@ -15,6 +17,15 @@ impl Lexer {
         self.blocks.pop().is_some()
     }
 
+    pub fn get_position(&self) -> Option<LexerPosition<'_>> {
+        let input = self.blocks.last()?;
+        Some(LexerPosition {
+            source_block_name: input.block.name(),
+            line_offset: input.line_offset,
+            line_number: input.line_number.unwrap_or_default(),
+        })
+    }
+
     pub fn scan_word(&mut self) -> Result<Option<Token<'_>>> {
         let Some(input) = self.blocks.last_mut() else {
             return Ok(None);
@@ -22,8 +33,31 @@ impl Lexer {
         input.scan_word()
     }
 
-    pub fn scan_word_until<P: Delimiter>(&mut self, p: P) -> Result<Token<'_>> {
-        self.use_last_block()?.scan_word_until(p)
+    pub fn scan_until_space_or_eof(&mut self) -> Result<Token<'_>> {
+        if let Some(input) = self.blocks.last_mut() {
+            if let Some(word) = input.scan_word()? {
+                return Ok(word);
+            }
+        }
+        Ok(Token { data: "" })
+    }
+
+    pub fn scan_until_delimiter(&mut self, delimiter: char) -> Result<Token<'_>> {
+        if let Some(token) = self.use_last_block()?.scan_until(delimiter)? {
+            Ok(token)
+        } else if delimiter as u32 == 0 {
+            Ok(Token { data: "" })
+        } else {
+            anyhow::bail!(UnexpectedEof)
+        }
+    }
+
+    pub fn scan_until<P: Delimiter>(&mut self, p: P) -> Result<Token<'_>> {
+        if let Some(token) = self.use_last_block()?.scan_until(p)? {
+            Ok(token)
+        } else {
+            anyhow::bail!(UnexpectedEof)
+        }
     }
 
     pub fn rewind(&mut self, offset: usize) {
@@ -63,8 +97,15 @@ impl Lexer {
     }
 
     fn use_last_block(&mut self) -> Result<&mut SourceBlockState> {
-        self.blocks.last_mut().ok_or(Error::UnexpectedEof)
+        self.blocks.last_mut().ok_or_else(|| UnexpectedEof.into())
     }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct LexerPosition<'a> {
+    pub source_block_name: &'a str,
+    pub line_offset: usize,
+    pub line_number: usize,
 }
 
 pub struct Token<'a> {
@@ -115,6 +156,7 @@ struct SourceBlockState {
     block: SourceBlock,
     line: String,
     line_offset: usize,
+    line_number: Option<usize>,
 }
 
 impl From<SourceBlock> for SourceBlockState {
@@ -123,6 +165,7 @@ impl From<SourceBlock> for SourceBlockState {
             block,
             line: Default::default(),
             line_offset: 0,
+            line_number: None,
         }
     }
 }
@@ -149,9 +192,9 @@ impl SourceBlockState {
         }
     }
 
-    fn scan_word_until<P: Delimiter>(&mut self, mut p: P) -> Result<Token<'_>> {
+    fn scan_until<P: Delimiter>(&mut self, mut p: P) -> Result<Option<Token<'_>>> {
         if (self.line.is_empty() || self.line_offset >= self.line.len()) && !self.read_line()? {
-            return Err(Error::UnexpectedEof);
+            return Ok(None);
         }
 
         let start = self.line_offset;
@@ -164,14 +207,14 @@ impl SourceBlockState {
 
         let end = self.line_offset;
 
-        if found && end >= start {
+        Ok(if found && end >= start {
             self.skip_symbol();
-            Ok(Token {
+            Some(Token {
                 data: &self.line[start..end],
             })
         } else {
-            Err(Error::UnexpectedEof)
-        }
+            None
+        })
     }
 
     fn rewind(&mut self, offset: usize) {
@@ -219,6 +262,13 @@ impl SourceBlockState {
         self.line_offset = 0;
         self.line.clear();
         let n = self.block.buffer_mut().read_line(&mut self.line)?;
+
+        if let Some(line_number) = &mut self.line_number {
+            *line_number += 1;
+        } else {
+            self.line_number = Some(0);
+        }
+
         Ok(n > 0)
     }
 }

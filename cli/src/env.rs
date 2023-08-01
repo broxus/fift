@@ -1,5 +1,5 @@
 use std::fs::File;
-use std::io::{BufReader, Read, Seek, SeekFrom};
+use std::io::{BufReader, Read, Result, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 
 use fift::core::{Environment, SourceBlock};
@@ -21,7 +21,7 @@ impl SystemEnvironment {
         Self { include_dirs }
     }
 
-    fn resolve_file(&self, name: &str) -> fift::Result<PathBuf> {
+    fn resolve_file(&self, name: &str) -> Result<PathBuf> {
         if Path::new(name).is_file() {
             return Ok(PathBuf::from(name));
         }
@@ -33,10 +33,10 @@ impl SystemEnvironment {
             }
         }
 
-        Err(fift::Error::IoError(std::io::Error::new(
+        Err(std::io::Error::new(
             std::io::ErrorKind::NotFound,
-            "File not found",
-        )))
+            format!("`{name}` file not found"),
+        ))
     }
 }
 
@@ -56,16 +56,16 @@ impl Environment for SystemEnvironment {
         self.resolve_file(name).is_ok()
     }
 
-    fn write_file(&mut self, name: &str, contents: &[u8]) -> fift::Result<()> {
+    fn write_file(&mut self, name: &str, contents: &[u8]) -> std::io::Result<()> {
         std::fs::write(self.resolve_file(name)?, contents)?;
         Ok(())
     }
 
-    fn read_file(&mut self, name: &str) -> fift::Result<Vec<u8>> {
+    fn read_file(&mut self, name: &str) -> std::io::Result<Vec<u8>> {
         std::fs::read(self.resolve_file(name)?).map_err(From::from)
     }
 
-    fn read_file_part(&mut self, name: &str, offset: u64, len: u64) -> fift::Result<Vec<u8>> {
+    fn read_file_part(&mut self, name: &str, offset: u64, len: u64) -> std::io::Result<Vec<u8>> {
         let mut result = Vec::new();
 
         let file = File::open(self.resolve_file(name)?)?;
@@ -75,7 +75,7 @@ impl Environment for SystemEnvironment {
         Ok(result)
     }
 
-    fn include(&self, name: &str) -> fift::Result<SourceBlock> {
+    fn include(&self, name: &str) -> std::io::Result<SourceBlock> {
         let file = File::open(self.resolve_file(name)?)?;
         let buffer = BufReader::new(file);
         Ok(fift::core::SourceBlock::new(name, buffer))

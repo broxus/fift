@@ -1,6 +1,7 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
+use anyhow::Result;
 use dyn_clone::DynClone;
 use everscale_types::cell::OwnedCellSlice;
 use everscale_types::prelude::*;
@@ -8,7 +9,6 @@ use num_bigint::BigInt;
 use num_traits::{One, Signed, ToPrimitive, Zero};
 
 use super::cont::*;
-use crate::error::*;
 
 pub struct Stack {
     items: Vec<Box<dyn StackValue>>,
@@ -28,28 +28,22 @@ impl Stack {
     }
 
     pub fn check_underflow(&self, n: usize) -> Result<()> {
-        if n > self.items.len() {
-            Err(Error::StackUnderflow)
-        } else {
-            Ok(())
-        }
+        anyhow::ensure!(n <= self.items.len(), StackError::StackUnderflow(n - 1));
+        Ok(())
     }
 
     pub fn fetch(&self, idx: usize) -> Result<Box<dyn StackValue>> {
         let len = self.items.len();
-        if idx < len {
-            let item = self.items[len - idx - 1].as_ref();
-            Ok(dyn_clone::clone_box(item))
-        } else {
-            Err(Error::StackUnderflow)
-        }
+        anyhow::ensure!(idx < len, StackError::StackUnderflow(idx));
+
+        let item = self.items[len - idx - 1].as_ref();
+        Ok(dyn_clone::clone_box(item))
     }
 
     pub fn swap(&mut self, lhs: usize, rhs: usize) -> Result<()> {
         let len = self.items.len();
-        if lhs >= len || rhs >= len {
-            return Err(Error::StackUnderflow);
-        }
+        anyhow::ensure!(lhs < len, StackError::StackUnderflow(lhs));
+        anyhow::ensure!(rhs < len, StackError::StackUnderflow(rhs));
         self.items.swap(len - lhs - 1, len - rhs - 1);
         Ok(())
     }
@@ -60,9 +54,10 @@ impl Stack {
 
     pub fn push_raw(&mut self, item: Box<dyn StackValue>) -> Result<()> {
         if let Some(capacity) = &mut self.capacity {
-            if self.items.len() >= *capacity {
-                return Err(Error::StackOverflow);
-            }
+            anyhow::ensure!(
+                self.items.len() < *capacity,
+                StackError::StackOverflow(*capacity)
+            );
             *capacity += 1;
         }
         self.items.push(item);
@@ -87,7 +82,10 @@ impl Stack {
     }
 
     pub fn pop(&mut self) -> Result<Box<dyn StackValue>> {
-        self.items.pop().ok_or(Error::StackUnderflow)
+        self.items
+            .pop()
+            .ok_or(StackError::StackUnderflow(0))
+            .map_err(From::from)
     }
 
     pub fn pop_bool(&mut self) -> Result<bool> {
@@ -98,21 +96,39 @@ impl Stack {
     pub fn pop_smallint_range(&mut self, min: u32, max: u32) -> Result<u32> {
         let item = self.pop_int()?;
         if let Some(item) = item.to_u32() {
-            if item <= max && item >= min {
+            if item >= min && item <= max {
                 return Ok(item);
             }
         }
-        Err(Error::ExpectedIntegerInRange)
+        anyhow::bail!(StackError::IntegerOutOfRange {
+            min,
+            max: max as usize,
+            actual: item.to_string(),
+        })
     }
 
     pub fn pop_usize(&mut self) -> Result<usize> {
-        self.pop_int()?
-            .to_usize()
-            .ok_or(Error::ExpectedIntegerInRange)
+        let item = self.pop_int()?;
+        if let Some(item) = item.to_usize() {
+            return Ok(item);
+        }
+        anyhow::bail!(StackError::IntegerOutOfRange {
+            min: 0,
+            max: usize::MAX,
+            actual: item.to_string(),
+        })
     }
 
     pub fn pop_smallint_char(&mut self) -> Result<char> {
-        char::from_u32(self.pop_smallint_range(0, char::MAX as u32)?).ok_or(Error::InvalidChar)
+        let item = self.pop_int()?;
+        if let Some(item) = item.to_u32() {
+            if item <= char::MAX as u32 {
+                if let Some(char) = char::from_u32(item) {
+                    return Ok(char);
+                }
+            }
+        }
+        anyhow::bail!(StackError::InvalidChar(item.to_string()))
     }
 
     pub fn pop_int(&mut self) -> Result<Box<BigInt>> {
@@ -155,10 +171,18 @@ impl Stack {
         self.pop()?.into_shared_box()
     }
 
-    pub fn display_dump(&self) -> impl std::fmt::Display + '_ {
-        struct StackDump<'a>(&'a Stack);
+    pub fn items(&self) -> &[Box<dyn StackValue>] {
+        &self.items
+    }
 
-        impl std::fmt::Display for StackDump<'_> {
+    pub fn clear(&mut self) {
+        self.items.clear();
+    }
+
+    pub fn display_dump(&self) -> impl std::fmt::Display + '_ {
+        struct DisplayDump<'a>(&'a Stack);
+
+        impl std::fmt::Display for DisplayDump<'_> {
             fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
                 let mut first = true;
                 for item in &self.0.items {
@@ -167,19 +191,19 @@ impl Stack {
                     } else {
                         f.write_str(" ")?;
                     }
-                    item.as_ref().dump(f)?;
+                    item.as_ref().fmt_dump(f)?;
                 }
                 Ok(())
             }
         }
 
-        StackDump(self)
+        DisplayDump(self)
     }
 
     pub fn display_list(&self) -> impl std::fmt::Display + '_ {
-        struct StackPrintList<'a>(&'a Stack);
+        struct DisplayList<'a>(&'a Stack);
 
-        impl std::fmt::Display for StackPrintList<'_> {
+        impl std::fmt::Display for DisplayList<'_> {
             fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
                 let mut first = true;
                 for item in &self.0.items {
@@ -188,21 +212,21 @@ impl Stack {
                     } else {
                         f.write_str(" ")?;
                     }
-                    item.as_ref().print_list(f)?;
+                    item.as_ref().fmt_list(f)?;
                 }
                 Ok(())
             }
         }
 
-        StackPrintList(self)
+        DisplayList(self)
     }
 }
 
 macro_rules! define_stack_value {
     ($trait:ident($value_type:ident), {$(
         $name:ident($ty:ty) = {
-            dump($dump_self:ident, $f:ident) = $dump_body:expr,
-            $cast:ident($cast_self:ident): $cast_res:ty = $cast_body:expr,
+            fmt_dump($dump_self:pat, $f:pat) = $fmt_dump_body:expr,
+            $cast:ident($cast_self:pat): $cast_res:ty = $cast_body:expr,
             $into:ident$(,)?
         }
     ),*$(,)?}) => {
@@ -214,14 +238,20 @@ macro_rules! define_stack_value {
         pub trait $trait: DynClone {
             fn ty(&self) -> $value_type;
 
-            fn dump(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result;
+            fn fmt_dump(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result;
 
             $(fn $cast(&self) -> Result<&$cast_res> {
-                Err(Error::InvalidType)
+                Err(StackError::UnexpectedType {
+                    expected: $value_type::$name,
+                    actual: self.ty(),
+                }.into())
             })*
 
             $(fn $into(self: Box<Self>) -> Result<Box<$ty>> {
-                Err(Error::InvalidType)
+                Err(StackError::UnexpectedType {
+                    expected: $value_type::$name,
+                    actual: self.ty(),
+                }.into())
             })*
         }
 
@@ -232,10 +262,10 @@ macro_rules! define_stack_value {
                 $value_type::$name
             }
 
-            fn dump(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            fn fmt_dump(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
                 let $dump_self = self;
                 let $f = f;
-                $dump_body
+                $fmt_dump_body
             }
 
             fn $cast(&self) -> Result<&$cast_res> {
@@ -253,28 +283,22 @@ macro_rules! define_stack_value {
 define_stack_value! {
     StackValue(StackValueType), {
         Null(()) = {
-            dump(_v, f) = {
-                f.write_str("(null)")
-            },
+            fmt_dump(_, f) = f.write_str("(null)"),
             as_null(v): () = Ok(v),
             into_null,
         },
         Int(BigInt) = {
-            dump(v, f) = {
-                std::fmt::Display::fmt(v, f)
-            },
+            fmt_dump(v, f) = std::fmt::Display::fmt(v, f),
             as_int(v): BigInt = Ok(v),
             into_int,
         },
         Cell(Cell) = {
-            dump(v, f) = {
-                write!(f, "C{{{}}}", v.repr_hash())
-            },
+            fmt_dump(v, f) = write!(f, "C{{{}}}", v.repr_hash()),
             as_cell(v): Cell = Ok(v),
             into_cell,
         },
         Builder(CellBuilder) = {
-            dump(_v, f) = {
+            fmt_dump(_v, f) = {
                 // TODO: print builder data as hex
                 f.write_str("BC{_data_}")
             },
@@ -282,7 +306,7 @@ define_stack_value! {
             into_builder,
         },
         Slice(OwnedCellSlice) = {
-            dump(_v, f) = {
+            fmt_dump(_v, f) = {
                 // TODO: print slice data as hex
                 f.write_str("CS{_data_}")
             },
@@ -290,28 +314,24 @@ define_stack_value! {
             into_slice,
         },
         String(String) = {
-            dump(v, f) = {
-                write!(f, "\"{v}\"")
-            },
+            fmt_dump(v, f) = write!(f, "\"{v}\""),
             as_string(v): String = Ok(v),
             into_string,
         },
         Bytes(Vec<u8>) = {
-            dump(v, f) = {
-                write!(f, "BYTES:{}", hex::encode_upper(v))
-            },
+            fmt_dump(v, f) = write!(f, "BYTES:{}", hex::encode_upper(v)),
             as_bytes(v): Vec<u8> = Ok(v),
             into_bytes,
         },
         Tuple(StackTuple) = {
-            dump(v, f) = {
+            fmt_dump(v, f) = {
                 if v.is_empty() {
                     return f.write_str("[]");
                 }
                 f.write_str("[")?;
                 for item in v {
                     f.write_str(" ")?;
-                    StackValue::dump(item.as_ref(), f)?;
+                    StackValue::fmt_dump(item.as_ref(), f)?;
                 }
                 f.write_str(" ]")
             },
@@ -319,29 +339,17 @@ define_stack_value! {
             into_tuple,
         },
         Cont(Cont) = {
-            dump(_v, f) = {
-                // TODO: dump content?
-                f.write_str("Cont")
-            },
+            fmt_dump(v, f) = write!(f, "Cont{{{:?}}}", Rc::as_ptr(v)),
             as_cont(v): Cont = Ok(v),
             into_cont,
         },
         WordList(WordList) = {
-            dump(_v, f) = {
-                // f.write_str("{")?;
-                // for item in &self.items {
-                //     write!(f, " {}", item.display_name(d))?;
-                // }
-                // f.write_str("}")
-                f.write_str("WordList")
-            },
+            fmt_dump(v, f) = write!(f, "WordList{{{:?}}}", &v as *const _),
             as_word_list(v): WordList = Ok(v),
             into_word_list,
         },
         SharedBox(SharedBox) = {
-            dump(v, f) = {
-                write!(f, "Box{{{:?}}}", Rc::as_ptr(&v.value))
-            },
+            fmt_dump(v, f) = write!(f, "Box{{{:?}}}", Rc::as_ptr(&v.value)),
             as_box(v): SharedBox = Ok(v),
             into_shared_box,
         }
@@ -350,34 +358,34 @@ define_stack_value! {
 
 impl dyn StackValue + '_ {
     pub fn display_dump(&self) -> impl std::fmt::Display + '_ {
-        pub struct StackValueDump<'a>(pub &'a dyn StackValue);
+        pub struct DisplayDump<'a>(&'a dyn StackValue);
 
-        impl std::fmt::Display for StackValueDump<'_> {
+        impl std::fmt::Display for DisplayDump<'_> {
             fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-                self.0.dump(f)
+                self.0.fmt_dump(f)
             }
         }
 
-        StackValueDump(self)
+        DisplayDump(self)
     }
 
     pub fn display_list(&self) -> impl std::fmt::Display + '_ {
-        pub struct StackValuePrintList<'a>(pub &'a dyn StackValue);
+        pub struct DisplayList<'a>(&'a dyn StackValue);
 
-        impl std::fmt::Display for StackValuePrintList<'_> {
+        impl std::fmt::Display for DisplayList<'_> {
             fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-                self.0.print_list(f)
+                self.0.fmt_list(f)
             }
         }
 
-        StackValuePrintList(self)
+        DisplayList(self)
     }
 
     pub fn is_null(&self) -> bool {
         self.ty() == StackValueType::Null
     }
 
-    pub fn as_pair(&self) -> Option<(&dyn StackValue, &dyn StackValue)> {
+    fn as_pair(&self) -> Option<(&dyn StackValue, &dyn StackValue)> {
         let tuple = self.as_tuple().ok()?;
         match tuple.as_slice() {
             [first, second] => Some((first.as_ref(), second.as_ref())),
@@ -385,7 +393,7 @@ impl dyn StackValue + '_ {
         }
     }
 
-    pub fn as_list(&self) -> Option<(&dyn StackValue, &dyn StackValue)> {
+    fn as_list(&self) -> Option<(&dyn StackValue, &dyn StackValue)> {
         let (head, tail) = self.as_pair()?;
 
         let mut next = tail;
@@ -397,40 +405,40 @@ impl dyn StackValue + '_ {
         Some((head, tail))
     }
 
-    pub fn print_list(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt_list(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         if self.is_null() {
             f.write_str("()")
         } else if let Ok(tuple) = self.as_tuple() {
             if let Some((head, tail)) = self.as_list() {
                 f.write_str("(")?;
-                head.print_list(f)?;
-                tail.print_list_tail(f)?;
+                head.fmt_list(f)?;
+                tail.fmt_list_tail(f)?;
                 return Ok(());
             }
 
             f.write_str("[ ")?;
             for item in tuple {
-                item.as_ref().print_list(f)?;
+                item.as_ref().fmt_list(f)?;
             }
             f.write_str("]")?;
 
             Ok(())
         } else {
-            self.dump(f)
+            self.fmt_dump(f)
         }
     }
 
-    fn print_list_tail(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt_list_tail(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let mut item = self;
         while !item.is_null() {
             let Some((head, tail)) = item.as_pair() else {
                 f.write_str(" . ")?;
-                item.print_list(f)?;
+                item.fmt_list(f)?;
                 break;
             };
 
             f.write_str(" ")?;
-            head.print_list(f)?;
+            head.fmt_list(f)?;
             item = tail;
         }
         f.write_str(")")
@@ -483,4 +491,25 @@ impl SharedBox {
     pub fn fetch(&self) -> Box<dyn StackValue> {
         self.value.borrow().clone()
     }
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum StackError {
+    #[error("Stack underflow at depth {0}")]
+    StackUnderflow(usize),
+    #[error("Stack overflow with limit {0}")]
+    StackOverflow(usize),
+    #[error("Expected type `{expected:?}`, found type `{actual:?}`")]
+    UnexpectedType {
+        expected: StackValueType,
+        actual: StackValueType,
+    },
+    #[error("Expected integer in range {min}..={max}, found {actual}")]
+    IntegerOutOfRange {
+        min: u32,
+        max: usize,
+        actual: String,
+    },
+    #[error("Expected a valid utf8 char code, found {0}")]
+    InvalidChar(String),
 }

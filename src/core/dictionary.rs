@@ -1,8 +1,9 @@
 use std::collections::hash_map::{self, HashMap};
 use std::rc::Rc;
 
+use anyhow::Result;
+
 use super::cont::{Cont, ContImpl, ContextTailWordFunc, ContextWordFunc, StackWordFunc};
-use crate::error::*;
 
 pub struct DictionaryEntry {
     pub definition: Cont,
@@ -39,7 +40,7 @@ impl Default for Dictionary {
                 Ok(None)
             }
 
-            fn write_name(
+            fn fmt_name(
                 &self,
                 _: &Dictionary,
                 f: &mut std::fmt::Formatter<'_>,
@@ -151,7 +152,7 @@ impl Dictionary {
             word: DictionaryEntry,
             allow_redefine: bool,
         ) -> Result<()> {
-            match words.entry(name) {
+            match words.entry(name.clone()) {
                 hash_map::Entry::Vacant(entry) => {
                     entry.insert(word);
                     Ok(())
@@ -160,7 +161,7 @@ impl Dictionary {
                     entry.insert(word);
                     Ok(())
                 }
-                _ => Err(Error::TypeRedefenition),
+                _ => anyhow::bail!("Word `{name}` unexpectedly redefined"),
             }
         }
         define_word_impl(&mut self.words, name.into(), word, allow_redefine)

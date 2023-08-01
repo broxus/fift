@@ -1,7 +1,5 @@
 use std::io::BufRead;
 
-use crate::error::*;
-
 pub trait Environment {
     fn now_ms(&self) -> u64;
 
@@ -9,13 +7,13 @@ pub trait Environment {
 
     fn file_exists(&self, name: &str) -> bool;
 
-    fn write_file(&mut self, name: &str, contents: &[u8]) -> Result<()>;
+    fn write_file(&mut self, name: &str, contents: &[u8]) -> std::io::Result<()>;
 
-    fn read_file(&mut self, name: &str) -> Result<Vec<u8>>;
+    fn read_file(&mut self, name: &str) -> std::io::Result<Vec<u8>>;
 
-    fn read_file_part(&mut self, name: &str, offset: u64, len: u64) -> Result<Vec<u8>>;
+    fn read_file_part(&mut self, name: &str, offset: u64, len: u64) -> std::io::Result<Vec<u8>>;
 
-    fn include(&self, name: &str) -> Result<SourceBlock>;
+    fn include(&self, name: &str) -> std::io::Result<SourceBlock>;
 }
 
 pub struct SourceBlock {
@@ -55,25 +53,26 @@ impl Environment for EmptyEnvironment {
         false
     }
 
-    fn write_file(&mut self, _: &str, _: &[u8]) -> Result<()> {
+    fn write_file(&mut self, _: &str, _: &[u8]) -> std::io::Result<()> {
         Ok(())
     }
 
-    fn read_file(&mut self, _: &str) -> Result<Vec<u8>> {
-        Err(Error::IoError(std::io::Error::new(
-            std::io::ErrorKind::NotFound,
-            "File not found",
-        )))
+    fn read_file(&mut self, name: &str) -> std::io::Result<Vec<u8>> {
+        Err(not_found(name))
     }
 
-    fn read_file_part(&mut self, name: &str, _: u64, _: u64) -> Result<Vec<u8>> {
+    fn read_file_part(&mut self, name: &str, _: u64, _: u64) -> std::io::Result<Vec<u8>> {
         self.read_file(name)
     }
 
-    fn include(&self, _: &str) -> Result<SourceBlock> {
-        Err(Error::IoError(std::io::Error::new(
-            std::io::ErrorKind::NotFound,
-            "Source not found",
-        )))
+    fn include(&self, name: &str) -> std::io::Result<SourceBlock> {
+        Err(not_found(name))
     }
+}
+
+fn not_found(name: &str) -> std::io::Error {
+    std::io::Error::new(
+        std::io::ErrorKind::NotFound,
+        format!("`{name}` file not found"),
+    )
 }

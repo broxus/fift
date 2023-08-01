@@ -1,5 +1,6 @@
+use anyhow::{Context as _, Result};
+
 use crate::core::*;
-use crate::error::*;
 
 pub use self::arithmetic::Arithmetic;
 pub use self::cell_utils::CellUtils;
@@ -80,7 +81,7 @@ impl FiftModule for BaseModule {
     #[cmd(name = "tpop", stack)]
     fn interpret_tuple_pop(stack: &mut Stack) -> Result<()> {
         let mut tuple = stack.pop_tuple()?;
-        let last = tuple.pop().ok_or(Error::TupleUnderflow)?;
+        let last = tuple.pop().context("Tuple underflow")?;
         stack.push_raw(tuple)?;
         stack.push_raw(last)
     }
@@ -89,7 +90,9 @@ impl FiftModule for BaseModule {
     fn interpret_tuple_index(stack: &mut Stack) -> Result<()> {
         let idx = stack.pop_usize()?;
         let tuple = stack.pop_tuple()?;
-        let value = tuple.get(idx).ok_or(Error::IndexOutOfRange)?;
+        let value = tuple
+            .get(idx)
+            .with_context(|| format!("Index {idx} is out of the tuple range"))?;
         stack.push_raw(dyn_clone::clone_box(value.as_ref()))
     }
 
@@ -98,7 +101,9 @@ impl FiftModule for BaseModule {
         let idx = stack.pop_usize()?;
         let value = stack.pop()?;
         let mut tuple = stack.pop_tuple()?;
-        *tuple.get_mut(idx).ok_or(Error::IndexOutOfRange)? = value;
+        *tuple
+            .get_mut(idx)
+            .with_context(|| format!("Index {idx} is out of the tuple range"))? = value;
         stack.push_raw(tuple)
     }
 
@@ -130,11 +135,13 @@ impl FiftModule for BaseModule {
         let tuple = stack.pop_tuple()?;
         if !pop_count {
             n = tuple.len();
-            if n > 255 {
-                return Err(Error::TupleTooLarge);
-            }
-        } else if tuple.len() != n {
-            return Err(Error::TupleSizeMismatch);
+            anyhow::ensure!(n <= 255, "Cannot untuple a tuple with {n} items");
+        } else {
+            anyhow::ensure!(
+                tuple.len() == n,
+                "Tuple size mismatch. Expected: {n}, actual: {}",
+                tuple.len()
+            );
         }
 
         for item in *tuple {

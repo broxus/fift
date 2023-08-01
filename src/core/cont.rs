@@ -1,10 +1,10 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
+use anyhow::Result;
 use num_bigint::BigInt;
 
 use super::{Context, Dictionary, Stack, StackValue, WordList};
-use crate::error::*;
 use crate::util::*;
 
 pub type Cont = Rc<dyn ContImpl>;
@@ -16,10 +16,10 @@ pub trait ContImpl {
         None
     }
 
-    fn write_name(&self, d: &Dictionary, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result;
+    fn fmt_name(&self, d: &Dictionary, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result;
 
-    fn dump(&self, d: &Dictionary, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        self.write_name(d, f)
+    fn fmt_dump(&self, d: &Dictionary, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.fmt_name(d, f)
     }
 }
 
@@ -57,7 +57,7 @@ impl dyn ContImpl + '_ {
 
         impl std::fmt::Display for ContinuationWriteName<'_> {
             fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-                self.cont.write_name(self.d, f)
+                self.cont.fmt_name(self.d, f)
             }
         }
 
@@ -72,7 +72,7 @@ impl dyn ContImpl + '_ {
 
         impl std::fmt::Display for ContinuationDump<'_> {
             fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-                self.cont.dump(self.d, f)
+                self.cont.fmt_dump(self.d, f)
             }
         }
 
@@ -135,7 +135,7 @@ impl ContImpl for InterpreterCont {
                         break 'token;
                     }
 
-                    return Err(Error::UndefinedWord);
+                    anyhow::bail!("Undefined word `{}`", token.data);
                 };
                 ctx.input.rewind(rewind);
 
@@ -161,7 +161,7 @@ impl ContImpl for InterpreterCont {
         }
     }
 
-    fn write_name(&self, _: &Dictionary, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt_name(&self, _: &Dictionary, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str("<text interpreter continuation>")
     }
 }
@@ -178,7 +178,7 @@ impl ContImpl for CompileExecuteCont {
         })
     }
 
-    fn write_name(&self, _: &Dictionary, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt_name(&self, _: &Dictionary, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str("<compile execute continuation>")
     }
 }
@@ -232,8 +232,8 @@ impl ContImpl for ListCont {
         self.after.as_ref()
     }
 
-    fn write_name(&self, d: &Dictionary, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        print_cont_name(self, d, f)
+    fn fmt_name(&self, d: &Dictionary, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write_cont_name(self, d, f)
     }
 }
 
@@ -277,19 +277,19 @@ impl ContImpl for SeqCont {
         self.second.as_ref()
     }
 
-    fn write_name(&self, d: &Dictionary, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt_name(&self, d: &Dictionary, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str("seq: ")?;
         if let Some(first) = &self.first {
-            first.as_ref().write_name(d, f)
+            first.as_ref().fmt_name(d, f)
         } else {
             Ok(())
         }
     }
 
-    fn dump(&self, d: &Dictionary, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt_dump(&self, d: &Dictionary, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str("seq: ")?;
         if let Some(first) = &self.first {
-            first.as_ref().dump(d, f)?;
+            first.as_ref().fmt_dump(d, f)?;
         }
         Ok(())
     }
@@ -339,14 +339,14 @@ impl ContImpl for TimesCont {
         self.after.as_ref()
     }
 
-    fn write_name(&self, _: &Dictionary, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt_name(&self, _: &Dictionary, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "<repeat {} times>", self.count)
     }
 
-    fn dump(&self, d: &Dictionary, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt_dump(&self, d: &Dictionary, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "<repeat {} times:> ", self.count)?;
         if let Some(body) = &self.body {
-            ContImpl::dump(body.as_ref(), d, f)?;
+            ContImpl::fmt_dump(body.as_ref(), d, f)?;
         }
         Ok(())
     }
@@ -391,14 +391,14 @@ impl ContImpl for UntilCont {
         self.after.as_ref()
     }
 
-    fn write_name(&self, _: &Dictionary, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt_name(&self, _: &Dictionary, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str("<until loop continuation>")
     }
 
-    fn dump(&self, d: &Dictionary, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt_dump(&self, d: &Dictionary, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str("<until loop continuation:> ")?;
         if let Some(body) = &self.body {
-            ContImpl::dump(body.as_ref(), d, f)?;
+            ContImpl::fmt_dump(body.as_ref(), d, f)?;
         }
         Ok(())
     }
@@ -458,11 +458,11 @@ impl ContImpl for WhileCont {
         self.after.as_ref()
     }
 
-    fn write_name(&self, _: &Dictionary, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt_name(&self, _: &Dictionary, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "<while loop {}>", self.stage_name())
     }
 
-    fn dump(&self, d: &Dictionary, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt_dump(&self, d: &Dictionary, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "<while loop {}:>", self.stage_name())?;
         let stage = if self.running_body {
             self.body.as_ref()
@@ -470,7 +470,7 @@ impl ContImpl for WhileCont {
             self.condition.as_ref()
         };
         if let Some(stage) = stage {
-            ContImpl::dump(stage.as_ref(), d, f)?;
+            ContImpl::fmt_dump(stage.as_ref(), d, f)?;
         }
         Ok(())
     }
@@ -494,7 +494,7 @@ impl ContImpl for IntLitCont {
         Ok(None)
     }
 
-    fn write_name(&self, _: &Dictionary, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt_name(&self, _: &Dictionary, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.0)
     }
 }
@@ -511,8 +511,8 @@ impl ContImpl for LitCont {
         Ok(None)
     }
 
-    fn write_name(&self, _: &Dictionary, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0.display_dump())
+    fn fmt_name(&self, _: &Dictionary, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt_dump(f)
     }
 }
 
@@ -535,7 +535,7 @@ impl ContImpl for MultiLitCont {
         Ok(None)
     }
 
-    fn write_name(&self, _: &Dictionary, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt_name(&self, _: &Dictionary, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let mut first = true;
         for item in &self.0 {
             if first {
@@ -543,7 +543,7 @@ impl ContImpl for MultiLitCont {
             } else {
                 f.write_str(" ")?;
             }
-            write!(f, "{}", item.display_dump())?;
+            item.fmt_dump(f)?;
         }
         Ok(())
     }
@@ -557,8 +557,8 @@ impl ContImpl for ContextWordFunc {
         Ok(None)
     }
 
-    fn write_name(&self, d: &Dictionary, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        print_cont_name(self, d, f)
+    fn fmt_name(&self, d: &Dictionary, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write_cont_name(self, d, f)
     }
 }
 
@@ -569,8 +569,8 @@ impl ContImpl for ContextTailWordFunc {
         (self)(ctx)
     }
 
-    fn write_name(&self, d: &Dictionary, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        print_cont_name(self, d, f)
+    fn fmt_name(&self, d: &Dictionary, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write_cont_name(self, d, f)
     }
 }
 
@@ -582,8 +582,8 @@ impl ContImpl for StackWordFunc {
         Ok(None)
     }
 
-    fn write_name(&self, d: &Dictionary, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        print_cont_name(self, d, f)
+    fn fmt_name(&self, d: &Dictionary, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write_cont_name(self, d, f)
     }
 }
 
@@ -600,7 +600,7 @@ impl Context<'_> {
     }
 }
 
-fn print_cont_name(
+fn write_cont_name(
     cont: &dyn ContImpl,
     d: &Dictionary,
     f: &mut std::fmt::Formatter<'_>,

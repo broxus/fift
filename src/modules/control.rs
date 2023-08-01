@@ -1,7 +1,9 @@
 use std::rc::Rc;
 
+use anyhow::{Context as _, Result};
+
 use crate::core::*;
-use crate::error::*;
+use crate::error::{ExecutionAborted, UnexpectedEof};
 
 pub struct Control;
 
@@ -117,8 +119,7 @@ impl Control {
     fn interpret_wordlist_begin(ctx: &mut Context) -> Result<()> {
         ctx.state.begin_compile()?;
         interpret_wordlist_begin_aux(&mut ctx.stack)?;
-        ctx.stack.push_argcount(0, ctx.dictionary.make_nop())?;
-        Ok(())
+        ctx.stack.push_argcount(0, ctx.dictionary.make_nop())
     }
 
     #[cmd(name = "}", active)]
@@ -152,13 +153,13 @@ impl Control {
 
     #[cmd(name = "'", active)]
     fn interpret_tick(ctx: &mut Context) -> Result<()> {
-        let word = ctx.input.scan_word()?.ok_or(Error::UnexpectedEof)?;
+        let word = ctx.input.scan_word()?.ok_or(UnexpectedEof)?;
         let entry = match ctx.dictionary.lookup(word.data) {
             Some(entry) => entry,
-            None => {
-                let word = format!("{} ", word.data);
-                ctx.dictionary.lookup(&word).ok_or(Error::UndefinedWord)?
-            }
+            None => ctx
+                .dictionary
+                .lookup(&format!("{} ", word.data))
+                .with_context(|| format!("Undefined word `{}`", word.data))?,
         };
         ctx.stack.push(entry.definition.clone())?;
         ctx.stack.push_argcount(1, ctx.dictionary.make_nop())
@@ -194,7 +195,7 @@ impl Control {
     fn interpret_create(ctx: &mut Context) -> Result<()> {
         // NOTE: same as `:`, but not active
         let cont = ctx.stack.pop_cont()?;
-        let name = ctx.input.scan_word()?.ok_or(Error::UnexpectedEof)?;
+        let name = ctx.input.scan_word()?.ok_or(UnexpectedEof)?;
 
         define_word(
             &mut ctx.dictionary,
@@ -230,7 +231,7 @@ impl Control {
     #[cmd(name = "::_", active, args(active = true, prefix = true))]
     fn interpret_colon(ctx: &mut Context, active: bool, prefix: bool) -> Result<()> {
         let cont = ctx.stack.pop_cont()?;
-        let name = ctx.input.scan_word()?.ok_or(Error::UnexpectedEof)?;
+        let name = ctx.input.scan_word()?.ok_or(UnexpectedEof)?;
 
         define_word(
             &mut ctx.dictionary,
@@ -248,14 +249,14 @@ impl Control {
         let mut word = if word_from_stack {
             *ctx.stack.pop_string()?
         } else {
-            let word = ctx.input.scan_word()?.ok_or(Error::UnexpectedEof)?;
+            let word = ctx.input.scan_word()?.ok_or(UnexpectedEof)?;
             word.data.to_owned()
         };
 
         if ctx.dictionary.lookup(&word).is_none() {
             word.push(' ');
             if ctx.dictionary.lookup(&word).is_none() {
-                return Err(Error::UndefinedWord);
+                anyhow::bail!("Undefined word `{}`", word.trim());
             }
         }
 
@@ -267,17 +268,13 @@ impl Control {
 
     #[cmd(name = "word")]
     fn interpret_word(ctx: &mut Context) -> Result<()> {
-        let separator = ctx.stack.pop_smallint_char()?;
-        let token = if separator.is_whitespace() {
-            ctx.input.scan_word()?.ok_or(Error::UnexpectedEof)?.data
+        let delim = ctx.stack.pop_smallint_char()?;
+        let token = if delim.is_whitespace() {
+            ctx.input.scan_until_space_or_eof()
         } else {
-            match ctx.input.scan_word_until(separator) {
-                Ok(token) => token.data,
-                Err(Error::UnexpectedEof) if separator as u32 == 0 => "",
-                Err(e) => return Err(e),
-            }
-        };
-        ctx.stack.push(token.to_owned())
+            ctx.input.scan_until_delimiter(delim)
+        }?;
+        ctx.stack.push(token.data.to_owned())
     }
 
     #[cmd(name = "skipspc")]
@@ -307,8 +304,9 @@ impl Control {
 
     #[cmd(name = "abort")]
     fn interpret_abort(ctx: &mut Context) -> Result<()> {
-        let _string = ctx.stack.pop_string()?;
-        Err(Error::ExecutionAborted)
+        ctx.stdout.flush()?;
+        let reason = *ctx.stack.pop_string()?;
+        Err(ExecutionAborted { reason }.into())
     }
 
     #[cmd(name = "quit")]
@@ -334,9 +332,7 @@ impl Control {
 }
 
 fn define_word(d: &mut Dictionary, mut word: String, cont: Cont, mode: DefMode) -> Result<()> {
-    if word.is_empty() {
-        return Err(Error::EmptyDefinitionName);
-    }
+    anyhow::ensure!(!word.is_empty(), "Word definition is empty");
     if !mode.prefix {
         word.push(' ');
     }
@@ -364,7 +360,7 @@ impl cont::ContImpl for ExitInterpretCont {
         Ok(None)
     }
 
-    fn write_name(&self, _: &Dictionary, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt_name(&self, _: &Dictionary, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str("'exit-interpret")
     }
 }
@@ -377,7 +373,7 @@ impl cont::ContImpl for ExitSourceBlockCont {
         Ok(None)
     }
 
-    fn write_name(&self, _: &Dictionary, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt_name(&self, _: &Dictionary, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str("<exit source block>")
     }
 }

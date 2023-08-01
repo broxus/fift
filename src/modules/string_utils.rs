@@ -1,9 +1,10 @@
+use anyhow::Result;
 use num_bigint::{BigInt, Sign};
 use num_traits::Num;
 use sha2::Digest;
 
 use crate::core::*;
-use crate::error::*;
+use crate::error::UnexpectedEof;
 use crate::util::*;
 
 pub struct StringUtils;
@@ -12,19 +13,17 @@ pub struct StringUtils;
 impl StringUtils {
     #[cmd(name = "\"", active, without_space)]
     fn interpret_quote_str(ctx: &mut Context) -> Result<()> {
-        let word = ctx.input.scan_word_until('"')?;
+        let word = ctx.input.scan_until('"')?;
         ctx.stack.push(word.data.to_owned())?;
         ctx.stack.push_argcount(1, ctx.dictionary.make_nop())
     }
 
     #[cmd(name = "char", active)]
     fn interpret_char(ctx: &mut Context) -> Result<()> {
-        let token = ctx.input.scan_word()?.ok_or(Error::UnexpectedEof)?;
+        let token = ctx.input.scan_word()?.ok_or(UnexpectedEof)?;
         let mut chars = token.data.chars();
-        let char = chars.next().ok_or(Error::UnexpectedEof)?;
-        if chars.next().is_some() {
-            return Err(Error::InvalidChar);
-        }
+        let char = chars.next().ok_or(UnexpectedEof)?;
+        anyhow::ensure!(chars.next().is_none(), "Expected exactly one character");
         ctx.stack.push_int(char as u32)?;
         ctx.stack.push_argcount(1, ctx.dictionary.make_nop())
     }
@@ -33,10 +32,8 @@ impl StringUtils {
     fn interpret_char_internal(stack: &mut Stack) -> Result<()> {
         let string = stack.pop_string()?;
         let mut chars = string.chars();
-        let char = chars.next().ok_or(Error::UnexpectedEof)?;
-        if chars.next().is_some() {
-            return Err(Error::InvalidChar);
-        }
+        let char = chars.next().ok_or(UnexpectedEof)?;
+        anyhow::ensure!(chars.next().is_none(), "Expected exactly one character");
         stack.push_int(char as u32)
     }
 
@@ -114,9 +111,10 @@ impl StringUtils {
     fn interpret_str_split(stack: &mut Stack) -> Result<()> {
         let at = stack.pop_smallint_range(0, i32::MAX as _)? as usize;
         let mut head = stack.pop_string()?;
-        if at > head.len() || !head.is_char_boundary(at) {
-            return Err(Error::IndexOutOfRange);
-        }
+
+        anyhow::ensure!(at <= head.len(), "Index out of range");
+        anyhow::ensure!(head.is_char_boundary(at), "Index is not the char boundary");
+
         let tail = Box::new(head[at..].to_owned());
         head.truncate(at);
 
@@ -221,7 +219,7 @@ impl StringUtils {
         }
 
         let i = string.len();
-        let bytes = hex::decode(*string).map_err(|_| Error::InvalidString)?;
+        let bytes = hex::decode(*string)?;
 
         stack.push(bytes)?;
         if partial {
@@ -234,9 +232,7 @@ impl StringUtils {
     fn interpret_bytes_split(stack: &mut Stack) -> Result<()> {
         let at = stack.pop_smallint_range(0, i32::MAX as _)? as usize;
         let mut head = stack.pop_bytes()?;
-        if at > head.len() {
-            return Err(Error::IndexOutOfRange);
-        }
+        anyhow::ensure!(at <= head.len(), "Index out of range");
         let tail = Box::new(head[at..].to_owned());
         head.truncate(at);
 
@@ -290,7 +286,7 @@ impl StringUtils {
     #[cmd(name = "base64>B", stack)]
     fn interpret_base64_to_bytes(stack: &mut Stack) -> Result<()> {
         let string = stack.pop_string()?;
-        let bytes = decode_base64(*string).map_err(|_| Error::InvalidString)?;
+        let bytes = decode_base64(*string)?;
         stack.push(bytes)
     }
 }

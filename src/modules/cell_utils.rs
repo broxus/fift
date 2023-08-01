@@ -1,5 +1,6 @@
 use std::collections::HashSet;
 
+use anyhow::{Context as _, Result};
 use everscale_types::cell::{MAX_BIT_LEN, MAX_REF_COUNT};
 use everscale_types::prelude::*;
 use num_bigint::{BigInt, Sign};
@@ -7,7 +8,6 @@ use num_traits::{ToPrimitive, Zero};
 use sha2::Digest;
 
 use crate::core::*;
-use crate::error::*;
 use crate::util::*;
 
 pub struct CellUtils;
@@ -28,9 +28,11 @@ impl CellUtils {
         let mut int = stack.pop_int()?;
         let mut builder = stack.pop_builder()?;
 
-        if int.bits() > bits as u64 {
-            return Err(Error::IntegerOverflow);
-        }
+        anyhow::ensure!(
+            int.bits() <= bits as u64,
+            "Integer does not fit into cell: {} bits out of {bits}",
+            int.bits()
+        );
 
         match int.to_u64() {
             Some(value) => builder.store_uint(value, bits)?,
@@ -76,7 +78,7 @@ impl CellUtils {
     fn interpret_store_str(stack: &mut Stack) -> Result<()> {
         let string = stack.pop_string()?;
         let mut builder = stack.pop_builder()?;
-        builder.store_raw(string.as_bytes(), len_as_bits(&*string)?)?;
+        builder.store_raw(string.as_bytes(), len_as_bits("string", &*string)?)?;
         stack.push_raw(builder)
     }
 
@@ -84,7 +86,7 @@ impl CellUtils {
     fn interpret_store_bytes(stack: &mut Stack) -> Result<()> {
         let bytes = stack.pop_bytes()?;
         let mut builder = stack.pop_builder()?;
-        builder.store_raw(bytes.as_slice(), len_as_bits(&*bytes)?)?;
+        builder.store_raw(bytes.as_slice(), len_as_bits("byte string", &*bytes)?)?;
         stack.push_raw(builder)
     }
 
@@ -122,7 +124,7 @@ impl CellUtils {
     fn interpret_string_to_cellslice(stack: &mut Stack) -> Result<()> {
         let string = stack.pop_string()?;
         let mut builder = CellBuilder::new();
-        builder.store_raw(string.as_bytes(), len_as_bits(&*string)?)?;
+        builder.store_raw(string.as_bytes(), len_as_bits("slice", &*string)?)?;
         let slice = OwnedCellSlice::new(builder.build()?)?;
         stack.push(slice)
     }
@@ -267,7 +269,7 @@ impl CellUtils {
                     stack.push_raw(raw_cs)?;
                 }
             }
-            Err(e) if !quiet => return Err(Error::CellError(e)),
+            Err(e) if !quiet => return Err(e.into()),
             _ => {}
         }
 
@@ -297,7 +299,7 @@ impl CellUtils {
             Ok(bytes) => {
                 let bytes = bytes.to_owned();
                 if s {
-                    let string = String::from_utf8(bytes).map_err(|_| Error::InvalidString)?;
+                    let string = String::from_utf8(bytes)?;
                     stack.push(string)?;
                 } else {
                     stack.push(bytes)?;
@@ -308,7 +310,7 @@ impl CellUtils {
                     stack.push_raw(cs)?;
                 }
             }
-            Err(e) if !quiet => return Err(Error::CellError(e)),
+            Err(e) if !quiet => return Err(e.into()),
             _ => {}
         }
 
@@ -336,7 +338,7 @@ impl CellUtils {
                     stack.push_raw(cs)?;
                 }
             }
-            Err(e) if !quiet => return Err(Error::CellError(e)),
+            Err(e) if !quiet => return Err(e.into()),
             _ => {}
         }
 
@@ -371,9 +373,10 @@ impl CellUtils {
     fn interpret_cell_check_empty(stack: &mut Stack) -> Result<()> {
         let item = stack.pop_slice()?;
         let item = item.pin();
-        if !item.is_data_empty() || !item.is_refs_empty() {
-            return Err(Error::ExpectedEmptySlice);
-        }
+        anyhow::ensure!(
+            item.is_data_empty() && item.is_refs_empty(),
+            "Expected empty cell slice"
+        );
         Ok(())
     }
 
@@ -388,7 +391,7 @@ impl CellUtils {
             let cell = stack.pop_cell()?;
             StorageStat::compute_for_cell(&**cell, LIMIT)
         }
-        .ok_or(Error::LimitExceeded)?;
+        .context("Storage compute depth limit reached")?;
         stack.push_int(cells)?;
         stack.push_int(bits)?;
         stack.push_int(refs)
@@ -426,9 +429,10 @@ impl CellUtils {
             0
         };
 
-        if mode & !SUPPORTED_MODES != 0 {
-            return Err(Error::UnsupportedMode);
-        }
+        anyhow::ensure!(
+            mode & !SUPPORTED_MODES == 0,
+            "Unsupported BOC serialization mode 0x{mode:x}"
+        );
 
         let cell = stack.pop_cell()?;
 
@@ -448,7 +452,7 @@ impl CellUtils {
 
     #[cmd(name = "x{", active, without_space)]
     fn interpret_bitstring_hex_literal(ctx: &mut Context) -> Result<()> {
-        let s = ctx.input.scan_word_until('}')?;
+        let s = ctx.input.scan_until('}')?;
         let builder = decode_hex_bitstring(s.data)?.build()?;
         ctx.stack.push(OwnedCellSlice::new(builder)?)?;
         ctx.stack.push_argcount(1, ctx.dictionary.make_nop())
@@ -456,7 +460,7 @@ impl CellUtils {
 
     #[cmd(name = "b{", active, without_space)]
     fn interpret_bitstring_binary_literal(ctx: &mut Context) -> Result<()> {
-        let s = ctx.input.scan_word_until('}')?;
+        let s = ctx.input.scan_until('}')?;
         let builder = decode_binary_bitstring(s.data)?.build()?;
         ctx.stack.push(OwnedCellSlice::new(builder)?)?;
         ctx.stack.push_argcount(1, ctx.dictionary.make_nop())
@@ -538,12 +542,11 @@ impl<'a> StorageStat<'a> {
     }
 }
 
-fn len_as_bits<T: AsRef<[u8]>>(data: T) -> Result<u16> {
+fn len_as_bits<T: AsRef<[u8]>>(name: &str, data: T) -> Result<u16> {
     let bits = data.as_ref().len() * 8;
-    if bits > everscale_types::cell::MAX_BIT_LEN as usize {
-        return Err(Error::CellError(
-            everscale_types::error::Error::CellOverflow,
-        ));
-    }
+    anyhow::ensure!(
+        bits <= everscale_types::cell::MAX_BIT_LEN as usize,
+        "{name} does not fit into cell"
+    );
     Ok(bits as u16)
 }

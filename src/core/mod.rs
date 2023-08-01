@@ -2,6 +2,8 @@ use std::io::Write;
 use std::num::NonZeroU32;
 use std::rc::Rc;
 
+use anyhow::{Context as _, Result};
+
 pub use fift_proc::fift_module;
 
 pub use self::cont::{Cont, ContImpl};
@@ -9,8 +11,6 @@ pub use self::dictionary::{Dictionary, DictionaryEntry};
 pub use self::env::{Environment, SourceBlock};
 pub use self::lexer::{Lexer, Token};
 pub use self::stack::{SharedBox, Stack, StackTuple, StackValue, StackValueType, WordList};
-
-use crate::error::*;
 
 pub mod cont;
 pub mod dictionary;
@@ -132,10 +132,10 @@ impl State {
                 Ok(())
             }
             Self::Compile(depth) => {
-                *depth = depth.checked_add(1).ok_or(Error::IntegerOverflow)?;
+                *depth = depth.checked_add(1).context("Compiler depth overflow")?;
                 Ok(())
             }
-            Self::InterpretInternal(_) => Err(Error::ExpectedNonInternalInterpreterMode),
+            Self::InterpretInternal(_) => anyhow::bail!("Expected non-internal interpreter mode"),
         }
     }
 
@@ -147,7 +147,7 @@ impl State {
             }
             Ok(())
         } else {
-            Err(Error::ExpectedCompilationMode)
+            anyhow::bail!("Expected compilation mode")
         }
     }
 
@@ -156,7 +156,7 @@ impl State {
             *self = Self::InterpretInternal(*depth);
             Ok(())
         } else {
-            Err(Error::ExpectedCompilationMode)
+            anyhow::bail!("Expected compilation mode")
         }
     }
 
@@ -165,7 +165,7 @@ impl State {
             *self = Self::Compile(*depth);
             Ok(())
         } else {
-            Err(Error::ExpectedInternalInterpreterMode)
+            anyhow::bail!("Expected internal interpreter mode")
         }
     }
 }

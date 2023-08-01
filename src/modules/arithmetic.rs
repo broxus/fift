@@ -1,11 +1,11 @@
 use std::rc::Rc;
 
+use anyhow::Result;
 use num_bigint::{BigInt, Sign};
 use num_integer::Integer;
 use num_traits::{One, Signed, Zero};
 
 use crate::core::*;
-use crate::error::*;
 
 pub struct Arithmetic;
 

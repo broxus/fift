@@ -1,8 +1,8 @@
+use anyhow::{Context as _, Result};
 use crc::Crc;
 use everscale_crypto::ed25519;
 
 use crate::core::*;
-use crate::error::*;
 
 pub struct Crypto;
 
@@ -67,25 +67,23 @@ impl Crypto {
 fn pop_secret_key(stack: &mut Stack) -> Result<ed25519::SecretKey> {
     let b = stack.pop_bytes()?;
     Ok(ed25519::SecretKey::from_bytes(
-        b.as_slice()
-            .try_into()
-            .map_err(|_| Error::InvalidSecretKey)?,
+        b.as_slice().try_into().ok().context("Invalid secret key")?,
     ))
 }
 
 fn pop_public_key(stack: &mut Stack) -> Result<ed25519::PublicKey> {
     let b = stack.pop_bytes()?;
-    ed25519::PublicKey::from_bytes(
-        b.as_slice()
-            .try_into()
-            .map_err(|_| Error::InvalidPublicKey)?,
-    )
-    .ok_or(Error::InvalidPublicKey)
+    if let Ok(b) = b.as_slice().try_into() {
+        if let Some(key) = ed25519::PublicKey::from_bytes(b) {
+            return Ok(key);
+        }
+    }
+    anyhow::bail!("Invalid public key")
 }
 
 fn pop_signature(stack: &mut Stack) -> Result<[u8; 64]> {
     let b = stack.pop_bytes()?;
-    b.as_slice().try_into().map_err(|_| Error::InvalidSignature)
+    b.as_slice().try_into().ok().context("Invalid signature")
 }
 
 const CRC_16: Crc<u16> = Crc::<u16>::new(&crc::CRC_16_XMODEM);

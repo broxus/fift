@@ -1,10 +1,9 @@
+use anyhow::Result;
 use everscale_types::cell::MAX_BIT_LEN;
 use everscale_types::prelude::*;
 use num_bigint::BigInt;
 use num_traits::Num;
 use unicode_segmentation::UnicodeSegmentation;
-
-use crate::error::*;
 
 pub struct ImmediateInt {
     pub num: BigInt,
@@ -18,7 +17,7 @@ impl ImmediateInt {
                 return Ok(None);
             };
             let Some(denom) = Self::parse_single_number(right)? else {
-                return Err(Error::InvalidNumber);
+                anyhow::bail!("Invalid number");
             };
             (num, Some(denom))
         } else {
@@ -45,8 +44,7 @@ impl ImmediateInt {
                 return Ok(None);
             }
             BigInt::from_str_radix(s, 10)
-        }
-        .map_err(|_| Error::InvalidNumber)?;
+        }?;
 
         if neg {
             num = -num;
@@ -94,9 +92,7 @@ pub(crate) fn encode_base64<T: AsRef<[u8]>>(data: T) -> String {
 }
 
 #[inline]
-pub(crate) fn decode_base64<T: AsRef<[u8]>>(
-    data: T,
-) -> std::result::Result<Vec<u8>, base64::DecodeError> {
+pub(crate) fn decode_base64<T: AsRef<[u8]>>(data: T) -> Result<Vec<u8>, base64::DecodeError> {
     use base64::Engine;
     fn decode_base64_impl(data: &[u8]) -> std::result::Result<Vec<u8>, base64::DecodeError> {
         base64::engine::general_purpose::STANDARD.decode(data)
@@ -199,13 +195,11 @@ pub fn decode_hex_bitstring(s: &str) -> Result<CellBuilder> {
             b'A'..=b'F' => Ok(c - b'A' + 10),
             b'a'..=b'f' => Ok(c - b'a' + 10),
             b'0'..=b'9' => Ok(c - b'0'),
-            _ => Err(Error::InvalidBitString),
+            _ => anyhow::bail!("Unexpected char `{c}` in hex bistring"),
         }
     }
 
-    if !s.is_ascii() {
-        return Err(Error::InvalidBitString);
-    }
+    anyhow::ensure!(s.is_ascii(), "Non-ascii characters in bitstring");
 
     let s = s.as_bytes();
     let (mut s, with_tag) = match s.strip_suffix(b"_") {
@@ -221,13 +215,11 @@ pub fn decode_hex_bitstring(s: &str) -> Result<CellBuilder> {
         }
     }
 
-    if s.len() > 128 * 2 {
-        return Err(Error::InvalidBitString);
-    }
+    anyhow::ensure!(s.len() <= 128 * 2, "Bitstring is too long");
 
     let mut builder = CellBuilder::new();
 
-    let mut bytes = hex::decode(s).map_err(|_| Error::InvalidBitString)?;
+    let mut bytes = hex::decode(s)?;
 
     let mut bits = bytes.len() as u16 * 8;
     if let Some(half_byte) = half_byte {
@@ -255,18 +247,16 @@ pub fn decode_binary_bitstring(s: &str) -> Result<CellBuilder> {
     let mut bits = 0;
     let mut buffer = [0; 128];
 
-    for char in s.as_bytes() {
+    for char in s.chars() {
         let value = match char {
-            b'0' => 0u8,
-            b'1' => 1,
-            _ => return Err(Error::InvalidBitString),
+            '0' => 0u8,
+            '1' => 1,
+            c => anyhow::bail!("Unexpected char `{c}` in binary bitstring"),
         };
         buffer[bits / 8] |= value << (7 - bits % 8);
 
         bits += 1;
-        if bits > MAX_BIT_LEN as usize {
-            return Err(Error::InvalidBitString);
-        }
+        anyhow::ensure!(bits <= MAX_BIT_LEN as usize, "Bitstring is too long");
     }
 
     let mut builder = CellBuilder::new();
