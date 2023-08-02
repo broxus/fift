@@ -10,7 +10,9 @@ pub use self::cont::{Cont, ContImpl};
 pub use self::dictionary::{Dictionary, DictionaryEntry};
 pub use self::env::{Environment, SourceBlock};
 pub use self::lexer::{Lexer, Token};
-pub use self::stack::{SharedBox, Stack, StackTuple, StackValue, StackValueType, WordList};
+pub use self::stack::{
+    OwnedCellSlice, SharedBox, Stack, StackTuple, StackValue, StackValueType, WordList,
+};
 
 pub mod cont;
 pub mod dictionary;

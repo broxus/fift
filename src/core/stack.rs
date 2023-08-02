@@ -4,7 +4,6 @@ use std::rc::Rc;
 use ahash::HashMap;
 use anyhow::Result;
 use dyn_clone::DynClone;
-use everscale_types::cell::OwnedCellSlice;
 use everscale_types::prelude::*;
 use num_bigint::BigInt;
 use num_traits::{One, ToPrimitive, Zero};
@@ -262,7 +261,7 @@ macro_rules! define_stack_value {
 
             fn fmt_dump(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result;
 
-            $(fn $cast(&self) -> Result<&$cast_res> {
+            $(fn $cast(&self) -> Result<$cast_res> {
                 Err(StackError::UnexpectedType {
                     expected: $value_type::$name,
                     actual: self.ty(),
@@ -300,7 +299,7 @@ macro_rules! define_stack_value {
                 $fmt_dump_body
             }
 
-            fn $cast(&self) -> Result<&$cast_res> {
+            fn $cast(&self) -> Result<$cast_res> {
                 let $cast_self = self;
                 $cast_body
             }
@@ -319,53 +318,46 @@ define_stack_value! {
         Null(()) = {
             eq(_, _) = true,
             fmt_dump(_, f) = f.write_str("(null)"),
-            as_null(v): () = Ok(v),
+            as_null(v): &() = Ok(v),
             into_null,
         },
         Int(BigInt) = {
             eq(a, b) = a == b,
             fmt_dump(v, f) = std::fmt::Display::fmt(v, f),
-            as_int(v): BigInt = Ok(v),
+            as_int(v): &BigInt = Ok(v),
             into_int,
         },
         Cell(Cell) = {
             eq(a, b) = a.as_ref() == b.as_ref(),
             fmt_dump(v, f) = write!(f, "C{{{}}}", v.repr_hash()),
-            as_cell(v): Cell = Ok(v),
+            as_cell(v): &Cell = Ok(v),
             into_cell,
         },
         Builder(CellBuilder) = {
-            eq(a, b) = {
-                // TODO: add `is_exotic` and check here
-                a.bit_len() == b.bit_len()
-                    && a.raw_data() == b.raw_data()
-                    && a.references() == b.references()
-            },
+            eq(a, b) = a == b,
             fmt_dump(v, f) = {
                 let bytes = (v.bit_len() + 7) / 8;
                 write!(f, "BC{{{}, bits={}}}", hex::encode(&v.raw_data()[..bytes as usize]), v.bit_len())
             },
-            as_builder(v): CellBuilder = Ok(v),
+            as_builder(v): &CellBuilder = Ok(v),
             into_builder,
         },
         Slice(OwnedCellSlice) = {
-            eq(a, b) = are_cell_slice_equal(a.pin(), b).unwrap_or_default(),
-            fmt_dump(v, f) = {
-                write!(f, "CS{{{}}}", v.pin().display_slice_data())
-            },
-            as_slice(v): CellSlice = Ok(v.pin()),
+            eq(a, b) = *a == b,
+            fmt_dump(v, f) = std::fmt::Display::fmt(v, f),
+            as_slice(v): CellSlice = v.apply(),
             into_slice,
         },
         String(String) = {
             eq(a, b) = a == b,
             fmt_dump(v, f) = write!(f, "\"{v}\""),
-            as_string(v): String = Ok(v),
+            as_string(v): &str = Ok(v),
             into_string,
         },
         Bytes(Vec<u8>) = {
             eq(a, b) = a == b,
             fmt_dump(v, f) = write!(f, "BYTES:{}", hex::encode_upper(v)),
-            as_bytes(v): Vec<u8> = Ok(v),
+            as_bytes(v): &[u8] = Ok(v),
             into_bytes,
         },
         Tuple(StackTuple) = {
@@ -383,7 +375,7 @@ define_stack_value! {
                 }
                 f.write_str(" ]")
             },
-            as_tuple(v): StackTuple = Ok(v),
+            as_tuple(v): &StackTuple = Ok(v),
             into_tuple,
         },
         Cont(Cont) = {
@@ -393,13 +385,13 @@ define_stack_value! {
                 std::ptr::eq(a, b)
             },
             fmt_dump(v, f) = write!(f, "Cont{{{:?}}}", Rc::as_ptr(v)),
-            as_cont(v): Cont = Ok(v),
+            as_cont(v): &Cont = Ok(v),
             into_cont,
         },
         WordList(WordList) = {
             eq(a, b) = a == b,
             fmt_dump(v, f) = write!(f, "WordList{{{:?}}}", &v as *const _),
-            as_word_list(v): WordList = Ok(v),
+            as_word_list(v): &WordList = Ok(v),
             into_word_list,
             {
                 fn into_cont(self: Box<Self>) -> Result<Box<Cont>> {
@@ -414,13 +406,13 @@ define_stack_value! {
                 std::ptr::eq(a, b)
             },
             fmt_dump(v, f) = write!(f, "Box{{{:?}}}", Rc::as_ptr(&v.value)),
-            as_box(v): SharedBox = Ok(v),
+            as_box(v): &SharedBox = Ok(v),
             into_shared_box,
         },
         Atom(Atom) = {
             eq(a, b) = a == b,
             fmt_dump(v, f) = std::fmt::Display::fmt(v, f),
-            as_atom(v): Atom = Ok(v),
+            as_atom(v): &Atom = Ok(v),
             into_atom,
         }
     }
@@ -516,6 +508,59 @@ impl dyn StackValue + '_ {
 }
 
 pub type StackTuple = Vec<Box<dyn StackValue>>;
+
+#[derive(Clone)]
+pub struct OwnedCellSlice {
+    cell: Cell,
+    range: CellSliceRange,
+}
+
+impl OwnedCellSlice {
+    pub fn new(cell: Cell) -> Self {
+        let range = CellSliceRange::full(cell.as_ref());
+        Self { cell, range }
+    }
+
+    pub fn apply(&self) -> Result<CellSlice<'_>> {
+        self.range.apply(&self.cell).map_err(From::from)
+    }
+
+    pub fn range(&self) -> CellSliceRange {
+        self.range
+    }
+
+    pub fn set_range(&mut self, range: CellSliceRange) {
+        self.range = range
+    }
+}
+
+impl From<CellSliceParts> for OwnedCellSlice {
+    fn from((cell, range): CellSliceParts) -> Self {
+        Self { cell, range }
+    }
+}
+
+impl PartialEq<CellSlice<'_>> for OwnedCellSlice {
+    fn eq(&self, right: &CellSlice<'_>) -> bool {
+        if let Ok(left) = self.apply() {
+            if let Ok(std::cmp::Ordering::Equal) = left.cmp_by_content(right) {
+                return true;
+            }
+        }
+        false
+    }
+}
+
+impl std::fmt::Display for OwnedCellSlice {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self.apply() {
+            Ok(slice) => {
+                write!(f, "CS{{{}}}", slice.display_slice_data())
+            }
+            Err(e) => write!(f, "CS{{Invalid: {e:?}}}"),
+        }
+    }
+}
 
 #[derive(Default, Clone)]
 pub struct WordList {
@@ -631,26 +676,6 @@ impl Atoms {
     pub fn get<T: AsRef<str>>(&self, name: T) -> Option<Atom> {
         self.named.get(name.as_ref()).cloned()
     }
-}
-
-fn are_cell_slice_equal(a: &CellSlice, b: &CellSlice) -> Result<bool> {
-    if a.remaining_bits() != b.remaining_bits() || a.remaining_refs() != b.remaining_refs() {
-        return Ok(false);
-    }
-    if a.references().zip(b.references()).any(|(a, b)| a != b) {
-        return Ok(false);
-    }
-
-    // TODO: add tests
-    let bits = a.remaining_bits();
-    let rem = bits % 32;
-    for offset in (0..bits - rem).step_by(32) {
-        if a.get_u32(offset)? != b.get_u32(offset)? {
-            return Ok(false);
-        }
-    }
-
-    Ok(rem == 0 || a.get_uint(bits - rem, rem)? == b.get_uint(bits - rem, rem)?)
 }
 
 #[derive(Debug, thiserror::Error)]

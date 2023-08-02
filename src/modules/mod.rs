@@ -10,6 +10,7 @@ pub use self::debug_utils::DebugUtils;
 pub use self::dict_utils::DictUtils;
 pub use self::stack_utils::StackUtils;
 pub use self::string_utils::StringUtils;
+pub use self::vm_utils::VmUtils;
 
 mod arithmetic;
 mod cell_utils;
@@ -19,6 +20,7 @@ mod debug_utils;
 mod dict_utils;
 mod stack_utils;
 mod string_utils;
+mod vm_utils;
 
 pub struct BaseModule;
 
