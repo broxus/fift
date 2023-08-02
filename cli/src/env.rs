@@ -14,7 +14,7 @@ impl SystemEnvironment {
         let include_dirs = if dirs.is_empty() {
             Vec::new()
         } else {
-            dirs.split(',')
+            dirs.split(':')
                 .map(|item| PathBuf::from(item.trim()))
                 .collect()
         };
