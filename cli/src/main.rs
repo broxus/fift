@@ -86,18 +86,22 @@ fn main() -> Result<ExitCode> {
             use ariadne::{Color, Label, Report, ReportKind, Source};
 
             if let Some(next) = ctx.next {
-                eprintln!("\n{}\n", next.display_backtrace(&ctx.dictionary));
+                eprintln!("Backtrace:\n{}\n", next.display_backtrace(&ctx.dictionary));
             }
 
             let Some(pos) = ctx.input.get_position() else {
                 return Err(e);
             };
 
-            Report::build(ReportKind::Error, (), 0)
+            let id = pos.source_block_name;
+            Report::build(ReportKind::Error, id, 0)
                 .with_message(format!("{e:?}"))
-                .with_label(Label::new(pos.line_offset..pos.line_offset + 1).with_color(Color::Red))
+                .with_label(
+                    Label::new((id, pos.line_offset_start..pos.line_offset_end))
+                        .with_color(Color::Red),
+                )
                 .finish()
-                .eprint(Source::from(pos.line))
+                .eprint((id, Source::from(pos.line)))
                 .unwrap();
 
             Ok(ExitCode::FAILURE)

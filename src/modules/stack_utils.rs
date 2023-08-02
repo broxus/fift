@@ -138,9 +138,10 @@ impl StackUtils {
 
     #[cmd(name = "?dup", stack)]
     fn interpret_cond_dup(stack: &mut Stack) -> Result<()> {
-        if !stack.pop()?.as_int()?.is_zero() {
-            stack.push_raw(stack.fetch(0)?)?;
+        let item = stack.pop_int()?;
+        if !item.is_zero() {
+            stack.push_raw(item.clone())?;
         }
-        Ok(())
+        stack.push_raw(item)
     }
 }

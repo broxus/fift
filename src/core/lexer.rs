@@ -24,7 +24,8 @@ impl Lexer {
             offset,
             source_block_name: input.block.name(),
             line: &input.line,
-            line_offset: input.line_offset,
+            line_offset_start: std::cmp::min(input.prev_line_offset + 1, input.line_offset),
+            line_offset_end: input.line_offset,
             line_number: input.line_number.unwrap_or_default(),
         })
     }
@@ -109,7 +110,8 @@ pub struct LexerPosition<'a> {
     pub offset: usize,
     pub source_block_name: &'a str,
     pub line: &'a str,
-    pub line_offset: usize,
+    pub line_offset_start: usize,
+    pub line_offset_end: usize,
     pub line_number: usize,
 }
 
@@ -161,6 +163,7 @@ struct SourceBlockState {
     block: SourceBlock,
     line: String,
     line_offset: usize,
+    prev_line_offset: usize,
     line_number: Option<usize>,
 }
 
@@ -170,6 +173,7 @@ impl From<SourceBlock> for SourceBlockState {
             block,
             line: Default::default(),
             line_offset: 0,
+            prev_line_offset: 0,
             line_number: None,
         }
     }
@@ -177,6 +181,8 @@ impl From<SourceBlock> for SourceBlockState {
 
 impl SourceBlockState {
     fn scan_word(&mut self) -> Result<Option<Token<'_>>> {
+        self.prev_line_offset = self.line_offset;
+
         loop {
             if (self.line.is_empty() || self.line_offset >= self.line.len()) && !self.read_line()? {
                 return Ok(None);
@@ -198,6 +204,8 @@ impl SourceBlockState {
     }
 
     fn scan_until<P: Delimiter>(&mut self, mut p: P) -> Result<Option<Token<'_>>> {
+        self.prev_line_offset = self.line_offset;
+
         if (self.line.is_empty() || self.line_offset >= self.line.len()) && !self.read_line()? {
             return Ok(None);
         }
@@ -227,6 +235,8 @@ impl SourceBlockState {
     }
 
     fn skip_whitespace(&mut self) -> Result<()> {
+        self.prev_line_offset = self.line_offset;
+
         loop {
             if (self.line.is_empty() || self.line_offset >= self.line.len()) && !self.read_line()? {
                 return Ok(());
@@ -264,6 +274,7 @@ impl SourceBlockState {
     }
 
     fn read_line(&mut self) -> Result<bool> {
+        self.prev_line_offset = 0;
         self.line_offset = 0;
         self.line.clear();
         let n = self.block.buffer_mut().read_line(&mut self.line)?;
