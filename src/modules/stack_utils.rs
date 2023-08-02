@@ -27,8 +27,8 @@ impl StackUtils {
 
     #[cmd(name = "2dup", stack)]
     fn interpret_2dup(stack: &mut Stack) -> Result<()> {
-        stack.push_raw(stack.fetch(0)?)?;
-        stack.push_raw(stack.fetch(0)?)
+        stack.push_raw(stack.fetch(1)?)?;
+        stack.push_raw(stack.fetch(1)?)
     }
 
     #[cmd(name = "over", stack)]
