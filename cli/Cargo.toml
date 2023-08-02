@@ -15,6 +15,7 @@ path = "src/main.rs"
 [dependencies]
 anyhow = "1.0"
 argh = "0.1"
+ariadne = "0.3.0"
 rustyline = { version = "11.0", default-features = false }
 
 fift = { path = "..", version = "0.1.3" }

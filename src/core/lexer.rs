@@ -18,9 +18,12 @@ impl Lexer {
     }
 
     pub fn get_position(&self) -> Option<LexerPosition<'_>> {
+        let offset = self.blocks.len();
         let input = self.blocks.last()?;
         Some(LexerPosition {
+            offset,
             source_block_name: input.block.name(),
+            line: &input.line,
             line_offset: input.line_offset,
             line_number: input.line_number.unwrap_or_default(),
         })
@@ -103,7 +106,9 @@ impl Lexer {
 
 #[derive(Debug, Clone, Copy)]
 pub struct LexerPosition<'a> {
+    pub offset: usize,
     pub source_block_name: &'a str,
+    pub line: &'a str,
     pub line_offset: usize,
     pub line_number: usize,
 }

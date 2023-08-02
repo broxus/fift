@@ -15,6 +15,7 @@ impl Context<'_> {
         self.with_module(BaseModule)?
             .with_module(Arithmetic)?
             .with_module(CellUtils)?
+            .with_module(DictUtils)?
             .with_module(Control)?
             .with_module(DebugUtils)?
             .with_module(StackUtils)?

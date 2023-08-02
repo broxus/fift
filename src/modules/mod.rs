@@ -7,6 +7,7 @@ pub use self::cell_utils::CellUtils;
 pub use self::control::Control;
 pub use self::crypto::Crypto;
 pub use self::debug_utils::DebugUtils;
+pub use self::dict_utils::DictUtils;
 pub use self::stack_utils::StackUtils;
 pub use self::string_utils::StringUtils;
 
@@ -15,6 +16,7 @@ mod cell_utils;
 mod control;
 mod crypto;
 mod debug_utils;
+mod dict_utils;
 mod stack_utils;
 mod string_utils;
 

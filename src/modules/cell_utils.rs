@@ -4,7 +4,7 @@ use anyhow::{Context as _, Result};
 use everscale_types::cell::{MAX_BIT_LEN, MAX_REF_COUNT};
 use everscale_types::prelude::*;
 use num_bigint::{BigInt, Sign};
-use num_traits::{ToPrimitive, Zero};
+use num_traits::Zero;
 use sha2::Digest;
 
 use crate::core::*;
@@ -27,42 +27,7 @@ impl CellUtils {
         let bits = stack.pop_smallint_range(0, 1023)? as u16;
         let mut int = stack.pop_int()?;
         let mut builder = stack.pop_builder()?;
-
-        anyhow::ensure!(
-            int.bits() <= bits as u64,
-            "Integer does not fit into cell: {} bits out of {bits}",
-            int.bits()
-        );
-
-        match int.to_u64() {
-            Some(value) => builder.store_uint(value, bits)?,
-            None => {
-                if bits % 8 != 0 {
-                    let align = 8 - bits % 8;
-                    *int <<= align;
-                }
-
-                let minimal_bytes = ((bits + 7) / 8) as usize;
-
-                let (prefix, mut bytes) = if signed {
-                    let bytes = int.to_signed_bytes_le();
-                    (
-                        bytes
-                            .last()
-                            .map(|first| (first >> 7) * 255)
-                            .unwrap_or_default(),
-                        bytes,
-                    )
-                } else {
-                    (0, int.to_bytes_le().1)
-                };
-                bytes.resize(minimal_bytes, prefix);
-                bytes.reverse();
-
-                builder.store_raw(&bytes, bits)?;
-            }
-        };
-
+        store_int_to_builder(&mut builder, &mut int, bits, signed)?;
         stack.push_raw(builder)
     }
 

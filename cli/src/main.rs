@@ -80,6 +80,27 @@ fn main() -> Result<ExitCode> {
     }
 
     // Execute
-    let exit_code = ctx.run()?;
-    Ok(ExitCode::from(!exit_code))
+    match ctx.run() {
+        Ok(exit_code) => Ok(ExitCode::from(!exit_code)),
+        Err(e) => {
+            use ariadne::{Color, Label, Report, ReportKind, Source};
+
+            if let Some(next) = ctx.next {
+                eprintln!("\n{}\n", next.display_backtrace(&ctx.dictionary));
+            }
+
+            let Some(pos) = ctx.input.get_position() else {
+                return Err(e);
+            };
+
+            Report::build(ReportKind::Error, (), 0)
+                .with_message(format!("{e:?}"))
+                .with_label(Label::new(pos.line_offset..pos.line_offset + 1).with_color(Color::Red))
+                .finish()
+                .eprint(Source::from(pos.line))
+                .unwrap();
+
+            Ok(ExitCode::FAILURE)
+        }
+    }
 }

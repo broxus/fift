@@ -2,7 +2,7 @@ use anyhow::Result;
 use everscale_types::cell::MAX_BIT_LEN;
 use everscale_types::prelude::*;
 use num_bigint::BigInt;
-use num_traits::Num;
+use num_traits::{Num, ToPrimitive};
 use unicode_segmentation::UnicodeSegmentation;
 
 pub struct ImmediateInt {
@@ -262,4 +262,48 @@ pub fn decode_binary_bitstring(s: &str) -> Result<CellBuilder> {
     let mut builder = CellBuilder::new();
     builder.store_raw(&buffer, bits as u16)?;
     Ok(builder)
+}
+
+pub fn store_int_to_builder(
+    builder: &mut CellBuilder,
+    int: &mut BigInt,
+    bits: u16,
+    signed: bool,
+) -> Result<()> {
+    anyhow::ensure!(
+        int.bits() <= bits as u64,
+        "Integer does not fit into cell: {} bits out of {bits}",
+        int.bits()
+    );
+
+    match int.to_u64() {
+        Some(value) => builder.store_uint(value, bits)?,
+        None => {
+            if bits % 8 != 0 {
+                let align = 8 - bits % 8;
+                *int <<= align;
+            }
+
+            let minimal_bytes = ((bits + 7) / 8) as usize;
+
+            let (prefix, mut bytes) = if signed {
+                let bytes = int.to_signed_bytes_le();
+                (
+                    bytes
+                        .last()
+                        .map(|first| (first >> 7) * 255)
+                        .unwrap_or_default(),
+                    bytes,
+                )
+            } else {
+                (0, int.to_bytes_le().1)
+            };
+            bytes.resize(minimal_bytes, prefix);
+            bytes.reverse();
+
+            builder.store_raw(&bytes, bits)?;
+        }
+    };
+
+    Ok(())
 }
