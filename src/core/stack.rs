@@ -243,6 +243,7 @@ macro_rules! define_stack_value {
             fmt_dump($dump_self:pat, $f:pat) = $fmt_dump_body:expr,
             $cast:ident($cast_self:pat): $cast_res:ty = $cast_body:expr,
             $into:ident$(,)?
+            $({ $($other:tt)* })?
         }
     ),*$(,)?}) => {
         #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
@@ -303,6 +304,8 @@ macro_rules! define_stack_value {
             fn $into(self: Box<Self>) -> Result<Box<$ty>> {
                 Ok(self)
             }
+
+            $($($other)*)?
         })*
     };
 }
@@ -395,6 +398,11 @@ define_stack_value! {
             fmt_dump(v, f) = write!(f, "WordList{{{:?}}}", &v as *const _),
             as_word_list(v): WordList = Ok(v),
             into_word_list,
+            {
+                fn into_cont(self: Box<Self>) -> Result<Box<Cont>> {
+                    Ok(Box::new(self.finish()))
+                }
+            }
         },
         SharedBox(SharedBox) = {
             eq(a, b) = {

@@ -230,17 +230,19 @@ impl Control {
     #[cmd(name = ":_", active, args(active = false, prefix = true))]
     #[cmd(name = "::_", active, args(active = true, prefix = true))]
     fn interpret_colon(ctx: &mut Context, active: bool, prefix: bool) -> Result<()> {
-        let cont = ctx.stack.pop_cont()?;
+        thread_local! {
+            static CREATE_AUX: Cont = Rc::new((|ctx| interpret_create_aux(ctx, None)) as cont::ContextWordFunc);
+        };
+
         let name = ctx.input.scan_word()?.ok_or(UnexpectedEof)?;
+        let mode = (active as u8) | (prefix as u8) << 1;
 
-        define_word(
-            &mut ctx.dictionary,
-            name.data.to_owned(),
-            *cont,
-            DefMode { active, prefix },
-        )?;
+        let cont = CREATE_AUX.with(|cont| cont.clone());
 
-        ctx.stack.push_argcount(0, ctx.dictionary.make_nop())
+        ctx.stack.push(name.data.to_owned())?;
+        ctx.stack.push_int(mode)?;
+        ctx.stack.push_int(2)?;
+        ctx.stack.push(cont)
     }
 
     #[cmd(name = "forget", args(word_from_stack = false))]
