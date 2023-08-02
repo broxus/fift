@@ -203,11 +203,10 @@ impl StringUtils {
         let string = stack.pop_string()?;
 
         let len = string.len();
-        anyhow::ensure!(x <= y, "x must be <= y, but x is {}", x);
+        anyhow::ensure!(x <= y, "x must be <= y, but x is {x}");
         anyhow::ensure!(
             x <= len && y <= len,
-            "x, y must be <= {} (string length)",
-            len
+            "x, y must be <= {len} (string length)"
         );
 
         stack.push(string[x..y].to_string())

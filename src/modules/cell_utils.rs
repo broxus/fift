@@ -59,7 +59,7 @@ impl CellUtils {
     fn interpret_store_cellslice(stack: &mut Stack) -> Result<()> {
         let slice = stack.pop_slice()?;
         let mut builder = stack.pop_builder()?;
-        builder.store_slice(slice.pin())?;
+        builder.store_slice(slice.apply()?)?;
         stack.push_raw(builder)
     }
 
@@ -68,7 +68,7 @@ impl CellUtils {
         let slice = stack.pop_slice()?;
         let cell = {
             let mut builder = CellBuilder::new();
-            builder.store_slice(slice.pin())?;
+            builder.store_slice(slice.apply()?)?;
             builder.build()?
         };
         let mut builder = stack.pop_builder()?;
@@ -90,8 +90,7 @@ impl CellUtils {
         let string = stack.pop_string()?;
         let mut builder = CellBuilder::new();
         builder.store_raw(string.as_bytes(), len_as_bits("slice", &*string)?)?;
-        let slice = OwnedCellSlice::new(builder.build()?)?;
-        stack.push(slice)
+        stack.push(OwnedCellSlice::new(builder.build()?))
     }
 
     #[cmd(name = "|+", stack)]
@@ -100,9 +99,9 @@ impl CellUtils {
         let cs1 = stack.pop_slice()?;
         stack.push({
             let mut builder = CellBuilder::new();
-            builder.store_slice(cs1.pin())?;
-            builder.store_slice(cs2.pin())?;
-            OwnedCellSlice::new(builder.build()?)?
+            builder.store_slice(cs1.apply()?)?;
+            builder.store_slice(cs2.apply()?)?;
+            OwnedCellSlice::new(builder.build()?)
         })
     }
 
@@ -113,15 +112,15 @@ impl CellUtils {
 
         let cell = {
             let mut builder = CellBuilder::new();
-            builder.store_slice(cs2.pin())?;
+            builder.store_slice(cs2.apply()?)?;
             builder.build()?
         };
 
         stack.push({
             let mut builder = CellBuilder::new();
-            builder.store_slice(cs1.pin())?;
+            builder.store_slice(cs1.apply()?)?;
             builder.store_reference(cell)?;
-            OwnedCellSlice::new(builder.build()?)?
+            OwnedCellSlice::new(builder.build()?)
         })
     }
 
@@ -182,8 +181,7 @@ impl CellUtils {
     #[cmd(name = "<s", stack)]
     fn interpret_from_cell(stack: &mut Stack) -> Result<()> {
         let item = stack.pop_cell()?;
-        let slice = OwnedCellSlice::new(*item)?;
-        stack.push(slice)
+        stack.push(OwnedCellSlice::new(*item))
     }
 
     #[cmd(name = "i@", stack, args(sgn = true, advance = false, quiet = false))]
@@ -197,12 +195,12 @@ impl CellUtils {
     fn interpret_load(stack: &mut Stack, sgn: bool, advance: bool, quiet: bool) -> Result<()> {
         let bits = stack.pop_smallint_range(0, 256 + sgn as u32)? as u16;
         let mut raw_cs = stack.pop_slice()?;
-        let cs = raw_cs.pin_mut();
+        let mut cs = raw_cs.apply()?;
 
         let int = match bits {
             0 => Ok(BigInt::zero()),
-            0..=64 if !sgn => cs.get_uint(0, bits).map(BigInt::from),
-            0..=64 if sgn => cs.get_uint(0, bits).map(|mut int| {
+            0..=64 if !sgn => cs.load_uint(bits).map(BigInt::from),
+            0..=64 if sgn => cs.load_uint(bits).map(|mut int| {
                 if bits < 64 {
                     // Clone sign bit into all high bits
                     int |= ((int >> (bits - 1)) * u64::MAX) << (bits - 1);
@@ -212,7 +210,7 @@ impl CellUtils {
             _ => {
                 let align = 8 - bits % 8;
                 let mut buffer = [0u8; 33];
-                cs.get_raw(0, &mut buffer, bits).map(|buffer| {
+                cs.load_raw(&mut buffer, bits).map(|buffer| {
                     let mut int = if sgn {
                         BigInt::from_signed_bytes_be(buffer)
                     } else {
@@ -229,7 +227,7 @@ impl CellUtils {
             Ok(int) => {
                 stack.push_int(int)?;
                 if advance {
-                    cs.try_advance(bits, 0);
+                    raw_cs.set_range(cs.range());
                     stack.push_raw(raw_cs)?;
                 }
             }
@@ -253,10 +251,11 @@ impl CellUtils {
     #[cmd(name = "B@?+", stack, args(s = false, advance = true, quiet = true))]
     fn interpret_load_bytes(stack: &mut Stack, s: bool, advance: bool, quiet: bool) -> Result<()> {
         let bits = stack.pop_smallint_range(0, 127)? as u16 * 8;
-        let mut cs = stack.pop_slice()?;
+        let mut cs_raw = stack.pop_slice()?;
+        let mut cs = cs_raw.apply()?;
 
         let mut buffer = [0; 128];
-        let bytes = cs.pin_mut().get_raw(0, &mut buffer, bits);
+        let bytes = cs.load_raw(&mut buffer, bits);
         let is_ok = bytes.is_ok();
 
         match bytes {
@@ -270,8 +269,8 @@ impl CellUtils {
                 }
 
                 if advance {
-                    cs.pin_mut().try_advance(bits, 0);
-                    stack.push_raw(cs)?;
+                    cs_raw.set_range(cs.range());
+                    stack.push_raw(cs_raw)?;
                 }
             }
             Err(e) if !quiet => return Err(e.into()),
@@ -289,17 +288,18 @@ impl CellUtils {
     #[cmd(name = "ref@?", stack, args(advance = false, quiet = true))]
     #[cmd(name = "ref@?+", stack, args(advance = true, quiet = true))]
     fn interpret_load_ref(stack: &mut Stack, advance: bool, quiet: bool) -> Result<()> {
-        let mut cs = stack.pop_slice()?;
+        let mut cs_raw = stack.pop_slice()?;
+        let mut cs = cs_raw.apply()?;
 
-        let cell = cs.pin_mut().get_reference_cloned(0);
+        let cell = cs.load_reference_cloned();
         let is_ok = cell.is_ok();
 
         match cell {
             Ok(cell) => {
                 stack.push(cell)?;
                 if advance {
-                    cs.pin_mut().try_advance(0, 1);
-                    stack.push_raw(cs)?;
+                    cs_raw.set_range(cs.range());
+                    stack.push_raw(cs_raw)?;
                 }
             }
             Err(e) if !quiet => return Err(e.into()),
@@ -315,7 +315,7 @@ impl CellUtils {
     #[cmd(name = "empty?", stack)]
     fn interpret_cell_empty(stack: &mut Stack) -> Result<()> {
         let cs = stack.pop_slice()?;
-        stack.push_bool(cs.pin().is_data_empty() && cs.pin().is_refs_empty())
+        stack.push_bool(cs.range().is_data_empty() && cs.range().is_refs_empty())
     }
 
     #[cmd(name = "sbits", stack, args(bits = true, refs = false))]
@@ -325,20 +325,19 @@ impl CellUtils {
     fn interpret_slice_bitrefs(stack: &mut Stack, bits: bool, refs: bool) -> Result<()> {
         let cs = stack.pop_slice()?;
         if bits {
-            stack.push_int(cs.pin().remaining_bits())?;
+            stack.push_int(cs.range().remaining_bits())?;
         }
         if refs {
-            stack.push_int(cs.pin().remaining_refs())?;
+            stack.push_int(cs.range().remaining_refs())?;
         }
         Ok(())
     }
 
     #[cmd(name = "s>", stack)]
     fn interpret_cell_check_empty(stack: &mut Stack) -> Result<()> {
-        let item = stack.pop_slice()?;
-        let item = item.pin();
+        let cs = stack.pop_slice()?;
         anyhow::ensure!(
-            item.is_data_empty() && item.is_refs_empty(),
+            cs.range().is_data_empty() && cs.range().is_refs_empty(),
             "Expected empty cell slice"
         );
         Ok(())
@@ -350,7 +349,8 @@ impl CellUtils {
         const LIMIT: usize = 1 << 22;
         let (cells, bits, refs) = if load_slice {
             let slice = stack.pop_slice()?;
-            StorageStat::compute_for_slice(slice.pin(), LIMIT)
+            let cs = slice.apply()?;
+            StorageStat::compute_for_slice(&cs, LIMIT)
         } else {
             let cell = stack.pop_cell()?;
             StorageStat::compute_for_cell(&**cell, LIMIT)
@@ -417,16 +417,16 @@ impl CellUtils {
     #[cmd(name = "x{", active, without_space)]
     fn interpret_bitstring_hex_literal(ctx: &mut Context) -> Result<()> {
         let s = ctx.input.scan_until('}')?;
-        let builder = decode_hex_bitstring(s.data)?.build()?;
-        ctx.stack.push(OwnedCellSlice::new(builder)?)?;
+        let cell = decode_hex_bitstring(s.data)?.build()?;
+        ctx.stack.push(OwnedCellSlice::new(cell))?;
         ctx.stack.push_argcount(1, ctx.dictionary.make_nop())
     }
 
     #[cmd(name = "b{", active, without_space)]
     fn interpret_bitstring_binary_literal(ctx: &mut Context) -> Result<()> {
         let s = ctx.input.scan_until('}')?;
-        let builder = decode_binary_bitstring(s.data)?.build()?;
-        ctx.stack.push(OwnedCellSlice::new(builder)?)?;
+        let cell = decode_binary_bitstring(s.data)?.build()?;
+        ctx.stack.push(OwnedCellSlice::new(cell))?;
         ctx.stack.push_argcount(1, ctx.dictionary.make_nop())
     }
 }

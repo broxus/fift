@@ -19,7 +19,7 @@ impl DictUtils {
     fn interpret_dict_to_slice(stack: &mut Stack) -> Result<()> {
         let maybe_cell = pop_maybe_cell(stack)?;
         let cell = CellBuilder::build_from(maybe_cell)?;
-        stack.push(OwnedCellSlice::new(cell)?)
+        stack.push(OwnedCellSlice::new(cell))
     }
 
     #[cmd(name = "dict,", stack)]
@@ -33,11 +33,13 @@ impl DictUtils {
     #[cmd(name = "dict@", stack, args(fetch = false))]
     #[cmd(name = "dict@+", stack, args(fetch = true))]
     fn interpret_load_dict(stack: &mut Stack, fetch: bool) -> Result<()> {
-        let mut cs = stack.pop_slice()?;
-        let cell = Option::<Cell>::load_from(cs.pin_mut())?;
+        let mut cs_raw = stack.pop_slice()?;
+        let mut cs = cs_raw.apply()?;
+        let cell = Option::<Cell>::load_from(&mut cs)?;
         push_maybe_cell(stack, cell)?;
         if fetch {
-            stack.push_raw(cs)?;
+            cs_raw.set_range(cs.range());
+            stack.push_raw(cs_raw)?;
         }
         Ok(())
     }
@@ -62,23 +64,23 @@ impl DictUtils {
         let cell = pop_maybe_cell(stack)?;
         let key = pop_dict_key(stack, key, bits)?;
         anyhow::ensure!(
-            key.pin().remaining_bits() >= bits,
+            key.range().remaining_bits() >= bits,
             "Not enough bits for a dictionary key"
         );
 
         let value = if b {
-            OwnedCellSlice::new(stack.pop_builder()?.build()?)?
+            OwnedCellSlice::new(stack.pop_builder()?.build()?)
         } else {
             *stack.pop_slice()?
         };
-        let value = value.pin();
+        let value = value.apply()?;
 
-        let mut key = key.pin().get_prefix(bits, 0);
+        let mut key = key.apply()?.get_prefix(bits, 0);
         let dict = dict_insert(
             &cell,
             &mut key,
             bits,
-            value,
+            &value,
             mode,
             &mut Cell::default_finalizer(),
         );
@@ -98,11 +100,11 @@ impl DictUtils {
         let cell = pop_maybe_cell(stack)?;
         let key = pop_dict_key(stack, key, bits)?;
         anyhow::ensure!(
-            key.pin().remaining_bits() >= bits,
+            key.range().remaining_bits() >= bits,
             "Not enough bits for a dictionary key"
         );
 
-        let key = key.pin().get_prefix(bits, 0);
+        let key = key.apply()?.get_prefix(bits, 0);
         let value = dict_get(&cell, bits, key).ok().flatten();
 
         let res = value.is_some();
@@ -110,9 +112,43 @@ impl DictUtils {
             // TODO: add owned `dict_get` to remove this intermediate builder
             let mut builder = CellBuilder::new();
             builder.store_slice(value)?;
-            stack.push(OwnedCellSlice::new(builder.build()?)?)?;
+            stack.push(OwnedCellSlice::new(builder.build()?))?;
         }
         stack.push_bool(res)
+    }
+
+    #[cmd(name = "sdict@-", stack, args(key = KeyMode::Slice, ignore = false))]
+    #[cmd(name = "udict@-", stack, args(key = KeyMode::Unsigned, ignore = false))]
+    #[cmd(name = "idict@-", stack, args(key = KeyMode::Signed, ignore = false))]
+    #[cmd(name = "sdict-", stack, args(key = KeyMode::Slice, ignore = true))]
+    #[cmd(name = "udict-", stack, args(key = KeyMode::Unsigned, ignore = true))]
+    #[cmd(name = "idict-", stack, args(key = KeyMode::Signed, ignore = true))]
+    fn interpret_dict_remove(stack: &mut Stack, key: KeyMode, ignore: bool) -> Result<()> {
+        let bits = stack.pop_smallint_range(0, MAX_KEY_BITS)? as u16;
+        let cell = pop_maybe_cell(stack)?;
+        let key = pop_dict_key(stack, key, bits)?;
+        anyhow::ensure!(
+            key.range().remaining_bits() >= bits,
+            "Not enough bits for a dictionary key"
+        );
+
+        let key = &mut key.apply()?.get_prefix(bits, 0);
+        let value = dict_remove_owned(&cell, key, bits, false, &mut Cell::default_finalizer()).ok();
+
+        let (dict, value) = match value {
+            Some((dict, value)) => (dict, value),
+            None => (cell.clone(), None),
+        };
+
+        push_maybe_cell(stack, dict)?;
+
+        let found = value.is_some();
+        if !ignore {
+            if let Some(value) = value {
+                stack.push(OwnedCellSlice::from(value))?;
+            }
+        }
+        stack.push_bool(found)
     }
 }
 
@@ -148,7 +184,7 @@ fn pop_dict_key(stack: &mut Stack, key_mode: KeyMode, bits: u16) -> Result<Owned
     let mut builder = CellBuilder::new();
     let mut int = stack.pop_int()?;
     store_int_to_builder(&mut builder, &mut int, bits, signed)?;
-    OwnedCellSlice::new(builder.build()?).map_err(From::from)
+    Ok(OwnedCellSlice::new(builder.build()?))
 }
 
 const MAX_KEY_BITS: u32 = 1023;

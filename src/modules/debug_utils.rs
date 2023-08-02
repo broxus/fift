@@ -50,7 +50,7 @@ impl DebugUtils {
         };
 
         let cs = ctx.stack.pop_slice()?;
-        write!(ctx.stdout, "{}", cs.pin().display_slice_tree(limit))?;
+        write!(ctx.stdout, "{}", cs.apply()?.display_slice_tree(limit))?;
         Ok(())
     }
 
