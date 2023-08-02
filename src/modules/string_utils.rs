@@ -170,7 +170,7 @@ impl StringUtils {
 
         match string.chars().nth(index) {
             Some(s) => stack.push(s.to_string()),
-            None => anyhow::bail!("index must be >= 0 and <= {}", usize::MAX),
+            None => anyhow::bail!("index must be >= 0 and <= {}", string.len()),
         }
     }
 
