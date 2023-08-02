@@ -202,7 +202,11 @@ impl StringUtils {
         let x = stack.pop_usize()?;
         let string = stack.pop_string()?;
 
-        stack.push(string[x..y].to_string())
+        let len = string.len();
+        anyhow::ensure!(x <= y, "x must be <= y, but x is {}", x);
+        anyhow::ensure!(x < len && y < len, "x, y must be < {} (string length)", len);
+
+        stack.push(string[x..=y].to_string())
     }
 
     // $sep (S S1 -- t(...))
