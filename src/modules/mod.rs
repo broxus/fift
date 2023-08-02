@@ -36,6 +36,7 @@ impl FiftModule for BaseModule {
     #[cmd(name = "integer?", stack, args(ty = StackValueType::Int))]
     #[cmd(name = "string?", stack, args(ty = StackValueType::String))]
     #[cmd(name = "tuple?", stack, args(ty = StackValueType::Tuple))]
+    #[cmd(name = "atom?", stack, args(ty = StackValueType::Atom))]
     fn interpret_is_type(stack: &mut Stack, ty: StackValueType) -> Result<()> {
         let is_ty = stack.pop()?.ty() == ty;
         stack.push_bool(is_ty)
@@ -63,6 +64,59 @@ impl FiftModule for BaseModule {
         let value = stack.pop_shared_box()?;
         value.store(stack.pop()?);
         Ok(())
+    }
+
+    #[cmd(name = "anon", stack)]
+    fn interpret_atom_anon(stack: &mut Stack) -> Result<()> {
+        let anon = stack.atoms_mut().create_anon();
+        stack.push(anon)
+    }
+
+    #[cmd(name = "(atom)", stack)]
+    fn interpret_atom(stack: &mut Stack) -> Result<()> {
+        let create = stack.pop_bool()?;
+        let name = stack.pop_string()?;
+        let mut atom = stack.atoms().get(&*name);
+        if create && atom.is_none() {
+            atom = Some(stack.atoms_mut().create_named(&*name));
+        }
+        let exists = atom.is_some();
+        if let Some(atom) = atom {
+            stack.push(atom)?;
+        }
+        stack.push_bool(exists)
+    }
+
+    #[cmd(name = "atom>$", stack)]
+    fn interpret_atom_name(stack: &mut Stack) -> Result<()> {
+        let atom = stack.pop_atom()?;
+        stack.push(atom.to_string())
+    }
+
+    #[cmd(name = "eq?", stack)]
+    fn interpret_is_eq(stack: &mut Stack) -> Result<()> {
+        let y = stack.pop()?;
+        let x = stack.pop()?;
+        stack.push_bool(x.is_equal(&*y))
+    }
+
+    #[cmd(name = "eqv?", stack)]
+    fn interpret_is_eqv(stack: &mut Stack) -> Result<()> {
+        let y = stack.pop()?;
+        let x = stack.pop()?;
+        let ty = x.ty();
+
+        stack.push_bool(if ty == y.ty() {
+            match ty {
+                StackValueType::Null => true,
+                StackValueType::Atom => *x.as_atom()? == *y.as_atom()?,
+                StackValueType::Int => *x.as_int()? == *y.as_int()?,
+                StackValueType::String => x.as_string()? == y.as_string()?,
+                _ => false,
+            }
+        } else {
+            false
+        })
     }
 
     #[cmd(name = "|", stack)]

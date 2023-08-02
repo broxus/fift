@@ -1,6 +1,7 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
+use ahash::HashMap;
 use anyhow::Result;
 use dyn_clone::DynClone;
 use everscale_types::cell::OwnedCellSlice;
@@ -13,6 +14,7 @@ use super::cont::*;
 pub struct Stack {
     items: Vec<Box<dyn StackValue>>,
     capacity: Option<usize>,
+    atoms: Atoms,
 }
 
 impl Stack {
@@ -20,11 +22,20 @@ impl Stack {
         Self {
             items: Default::default(),
             capacity,
+            atoms: Atoms::default(),
         }
     }
 
     pub fn depth(&self) -> usize {
         self.items.len()
+    }
+
+    pub fn atoms(&self) -> &Atoms {
+        &self.atoms
+    }
+
+    pub fn atoms_mut(&mut self) -> &mut Atoms {
+        &mut self.atoms
     }
 
     pub fn check_underflow(&self, n: usize) -> Result<()> {
@@ -170,6 +181,10 @@ impl Stack {
         self.pop()?.into_shared_box()
     }
 
+    pub fn pop_atom(&mut self) -> Result<Box<Atom>> {
+        self.pop()?.into_atom()
+    }
+
     pub fn items(&self) -> &[Box<dyn StackValue>] {
         &self.items
     }
@@ -224,6 +239,7 @@ impl Stack {
 macro_rules! define_stack_value {
     ($trait:ident($value_type:ident), {$(
         $name:ident($ty:ty) = {
+            eq($eq_self:pat, $eq_other:pat) = $eq_body:expr,
             fmt_dump($dump_self:pat, $f:pat) = $fmt_dump_body:expr,
             $cast:ident($cast_self:pat): $cast_res:ty = $cast_body:expr,
             $into:ident$(,)?
@@ -236,6 +252,8 @@ macro_rules! define_stack_value {
 
         pub trait $trait: DynClone {
             fn ty(&self) -> $value_type;
+
+            fn is_equal(&self, other: &dyn $trait) -> bool;
 
             fn fmt_dump(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result;
 
@@ -261,6 +279,16 @@ macro_rules! define_stack_value {
                 $value_type::$name
             }
 
+            fn is_equal(&self, other: &dyn $trait) -> bool {
+                match other.$cast() {
+                    Ok($eq_other) => {
+                        let $eq_self = self;
+                        $eq_body
+                    },
+                    Err(_) => false,
+                }
+            }
+
             fn fmt_dump(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
                 let $dump_self = self;
                 let $f = f;
@@ -282,21 +310,30 @@ macro_rules! define_stack_value {
 define_stack_value! {
     StackValue(StackValueType), {
         Null(()) = {
+            eq(_, _) = true,
             fmt_dump(_, f) = f.write_str("(null)"),
             as_null(v): () = Ok(v),
             into_null,
         },
         Int(BigInt) = {
+            eq(a, b) = a == b,
             fmt_dump(v, f) = std::fmt::Display::fmt(v, f),
             as_int(v): BigInt = Ok(v),
             into_int,
         },
         Cell(Cell) = {
+            eq(a, b) = a.as_ref() == b.as_ref(),
             fmt_dump(v, f) = write!(f, "C{{{}}}", v.repr_hash()),
             as_cell(v): Cell = Ok(v),
             into_cell,
         },
         Builder(CellBuilder) = {
+            eq(a, b) = {
+                // TODO: add `is_exotic` and check here
+                a.bit_len() == b.bit_len()
+                    && a.raw_data() == b.raw_data()
+                    && a.references() == b.references()
+            },
             fmt_dump(_v, f) = {
                 // TODO: print builder data as hex
                 f.write_str("BC{_data_}")
@@ -305,6 +342,7 @@ define_stack_value! {
             into_builder,
         },
         Slice(OwnedCellSlice) = {
+            eq(a, b) = are_cell_slice_equal(a.pin(), b).unwrap_or_default(),
             fmt_dump(_v, f) = {
                 // TODO: print slice data as hex
                 f.write_str("CS{_data_}")
@@ -313,16 +351,21 @@ define_stack_value! {
             into_slice,
         },
         String(String) = {
+            eq(a, b) = a == b,
             fmt_dump(v, f) = write!(f, "\"{v}\""),
             as_string(v): String = Ok(v),
             into_string,
         },
         Bytes(Vec<u8>) = {
+            eq(a, b) = a == b,
             fmt_dump(v, f) = write!(f, "BYTES:{}", hex::encode_upper(v)),
             as_bytes(v): Vec<u8> = Ok(v),
             into_bytes,
         },
         Tuple(StackTuple) = {
+            eq(a, b) = {
+                a.len() == b.len() && a.iter().zip(b.iter()).all(|(a, b)| a.is_equal(b.as_ref()))
+            },
             fmt_dump(v, f) = {
                 if v.is_empty() {
                     return f.write_str("[]");
@@ -338,19 +381,36 @@ define_stack_value! {
             into_tuple,
         },
         Cont(Cont) = {
+            eq(a, b) = {
+                let a = Rc::as_ptr(a) as *const ();
+                let b = Rc::as_ptr(b) as *const ();
+                std::ptr::eq(a, b)
+            },
             fmt_dump(v, f) = write!(f, "Cont{{{:?}}}", Rc::as_ptr(v)),
             as_cont(v): Cont = Ok(v),
             into_cont,
         },
         WordList(WordList) = {
+            eq(a, b) = a == b,
             fmt_dump(v, f) = write!(f, "WordList{{{:?}}}", &v as *const _),
             as_word_list(v): WordList = Ok(v),
             into_word_list,
         },
         SharedBox(SharedBox) = {
+            eq(a, b) = {
+                let a = Rc::as_ptr(&a.value) as *const ();
+                let b = Rc::as_ptr(&b.value) as *const ();
+                std::ptr::eq(a, b)
+            },
             fmt_dump(v, f) = write!(f, "Box{{{:?}}}", Rc::as_ptr(&v.value)),
             as_box(v): SharedBox = Ok(v),
             into_shared_box,
+        },
+        Atom(Atom) = {
+            eq(a, b) = a == b,
+            fmt_dump(v, f) = std::fmt::Display::fmt(v, f),
+            as_atom(v): Atom = Ok(v),
+            into_atom,
         }
     }
 }
@@ -465,6 +525,19 @@ impl WordList {
     }
 }
 
+impl Eq for WordList {}
+
+impl PartialEq for WordList {
+    fn eq(&self, other: &Self) -> bool {
+        self.items.len() == other.items.len()
+            && self.items.iter().zip(other.items.iter()).all(|(a, b)| {
+                let a = Rc::as_ptr(a) as *const ();
+                let b = Rc::as_ptr(b) as *const ();
+                std::ptr::eq(a, b)
+            })
+    }
+}
+
 #[derive(Clone)]
 pub struct SharedBox {
     value: Rc<RefCell<Box<dyn StackValue>>>,
@@ -490,6 +563,83 @@ impl SharedBox {
     pub fn fetch(&self) -> Box<dyn StackValue> {
         self.value.borrow().clone()
     }
+}
+
+#[derive(Clone, Eq, PartialEq)]
+pub enum Atom {
+    Unnamed(i32),
+    Named(Rc<str>),
+}
+
+impl std::fmt::Display for Atom {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Unnamed(idx) => write!(f, "atom#{idx}"),
+            Self::Named(name) => name.fmt(f),
+        }
+    }
+}
+
+impl<T: AsRef<str>> PartialEq<T> for Atom {
+    fn eq(&self, other: &T) -> bool {
+        match self {
+            Self::Unnamed(_) => false,
+            Self::Named(name) => name.as_ref() == other.as_ref(),
+        }
+    }
+}
+
+#[derive(Default)]
+pub struct Atoms {
+    named: HashMap<Rc<str>, Atom>,
+    total_anon: u32,
+}
+
+impl Atoms {
+    pub fn clear(&mut self) {
+        self.named.clear();
+        self.total_anon = 0;
+    }
+
+    pub fn create_anon(&mut self) -> Atom {
+        self.total_anon += 1;
+        Atom::Unnamed(-(self.total_anon as i32))
+    }
+
+    pub fn create_named<T: AsRef<str>>(&mut self, name: T) -> Atom {
+        if let Some(atom) = self.named.get(name.as_ref()) {
+            return atom.clone();
+        }
+
+        let name = Rc::<str>::from(name.as_ref());
+        let atom = Atom::Named(name.clone());
+        self.named.insert(name, atom.clone());
+        atom
+    }
+
+    pub fn get<T: AsRef<str>>(&self, name: T) -> Option<Atom> {
+        self.named.get(name.as_ref()).cloned()
+    }
+}
+
+fn are_cell_slice_equal(a: &CellSlice, b: &CellSlice) -> Result<bool> {
+    if a.remaining_bits() != b.remaining_bits() || a.remaining_refs() != b.remaining_refs() {
+        return Ok(false);
+    }
+    if a.references().zip(b.references()).any(|(a, b)| a != b) {
+        return Ok(false);
+    }
+
+    // TODO: add tests
+    let bits = a.remaining_bits();
+    let rem = bits % 32;
+    for offset in (0..bits - rem).step_by(32) {
+        if a.get_u32(offset)? != b.get_u32(offset)? {
+            return Ok(false);
+        }
+    }
+
+    Ok(rem == 0 || a.get_uint(bits - rem, rem)? == b.get_uint(bits - rem, rem)?)
 }
 
 #[derive(Debug, thiserror::Error)]

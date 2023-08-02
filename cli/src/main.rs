@@ -50,14 +50,12 @@ fn main() -> Result<ExitCode> {
     let mut stdout: Box<dyn std::io::Write> = Box::new(std::io::stdout());
     let base_source_block = if let Some(path) = app.source_file {
         env.include(&path)?
+    } else if std::io::stdin().is_terminal() {
+        let mut line_reader = LineReader::new()?;
+        stdout = line_reader.create_external_printer()?;
+        SourceBlock::new("<stdin>", line_reader)
     } else {
-        if std::io::stdin().is_terminal() {
-            let mut line_reader = LineReader::new()?;
-            stdout = line_reader.create_external_printer()?;
-            SourceBlock::new("<stdin>", line_reader)
-        } else {
-            SourceBlock::new("<stdin>", std::io::stdin().lock())
-        }
+        SourceBlock::new("<stdin>", std::io::stdin().lock())
     };
 
     // Prepare preamble block

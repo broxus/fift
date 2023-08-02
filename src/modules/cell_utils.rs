@@ -369,7 +369,7 @@ impl CellUtils {
         Ok(())
     }
 
-    #[cmd(name = ">s", stack)]
+    #[cmd(name = "s>", stack)]
     fn interpret_cell_check_empty(stack: &mut Stack) -> Result<()> {
         let item = stack.pop_slice()?;
         let item = item.pin();

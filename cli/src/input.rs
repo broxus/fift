@@ -76,7 +76,7 @@ impl std::io::BufRead for LineReader {
             loop {
                 if self.add_newline.get() {
                     self.add_newline.set(false);
-                    println!("");
+                    println!();
                 }
 
                 match self.editor.readline("> ") {

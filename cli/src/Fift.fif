@@ -133,12 +133,8 @@ variable base
 { null ' cons rot times } : list
 { -rot pair swap ! } : 2!
 { @ unpair } : 2@
-
-/* UNIMPLEMENTED
 { true (atom) drop } : atom
 { bl word atom 1 'nop } ::_ `
-*/
-
 { hole dup 1 { @ execute } does create } : recursive
 
 /* UNIMPLEMENTED
