@@ -162,6 +162,91 @@ impl StringUtils {
         })
     }
 
+    // $at (S n -- S')
+    #[cmd(name = "$at", stack)]
+    fn interpret_str_at(stack: &mut Stack) -> Result<()> {
+        let index = stack.pop_usize()?;
+        let string = stack.pop_string()?;
+
+        match string.chars().nth(index) {
+            Some(s) => stack.push(s.to_string()),
+            None => anyhow::bail!("index must be >= 0 and <= {}", string.len()),
+        }
+    }
+
+    // $mul (S n -- S*n)
+    #[cmd(name = "$mul", stack)]
+    fn interpret_str_mul(stack: &mut Stack) -> Result<()> {
+        let factor = stack.pop_usize()?;
+        let string = stack.pop_string()?;
+
+        stack.push(string.repeat(factor))
+    }
+
+    // $sybs (S -- t[S'0, S'1, S'2, ..., S'n])
+    #[cmd(name = "$sybs", stack)]
+    fn interpret_str_sybs(stack: &mut Stack) -> Result<()> {
+        let string = stack.pop_string()?;
+        let symbols = string
+            .chars()
+            .map(|c| Box::new(c.to_string()) as Box<dyn StackValue>)
+            .collect::<Vec<_>>();
+
+        stack.push(symbols)
+    }
+
+    // $sub (S x y -- S')
+    #[cmd(name = "$sub", stack)]
+    fn interpret_str_sub(stack: &mut Stack) -> Result<()> {
+        let y = stack.pop_usize()?;
+        let x = stack.pop_usize()?;
+        let string = stack.pop_string()?;
+
+        let len = string.len();
+        anyhow::ensure!(x <= y, "x must be <= y, but x is {x}");
+        anyhow::ensure!(
+            x <= len && y <= len,
+            "x, y must be <= {len} (string length)"
+        );
+
+        stack.push(string[x..y].to_string())
+    }
+
+    // $sep (S S1 -- t(...))
+    #[cmd(name = "$sep", stack)]
+    fn interpret_str_split_by_str(stack: &mut Stack) -> Result<()> {
+        let sep = stack.pop_string()?;
+        let string = stack.pop_string()?;
+
+        let substrings = string
+            .split(sep.as_str())
+            .map(|s| Box::new(s.to_string()) as Box<dyn StackValue>)
+            .collect::<Vec<_>>();
+
+        stack.push(substrings)
+    }
+
+    #[cmd(name = "$rep", stack, args(pop_n = false))] // $rep  (S S1 S2   -- S')
+    #[cmd(name = "$repn", stack, args(pop_n = true))] // $repn (S S1 S2 n -- S')
+    fn interpret_str_replace(stack: &mut Stack, pop_n: bool) -> Result<()> {
+        let n = if pop_n { stack.pop_usize()? } else { 1 };
+
+        let s2 = stack.pop_string()?;
+        let s1 = stack.pop_string()?;
+        let string = stack.pop_string()?;
+
+        stack.push(string.replacen(s1.as_str(), s2.as_str(), n))
+    }
+
+    #[cmd(name = "$repm", stack)] // $repm (S S1 S2 -- S')
+    fn interpret_str_replace_max(stack: &mut Stack) -> Result<()> {
+        let s2 = stack.pop_string()?;
+        let s1 = stack.pop_string()?;
+        let string = stack.pop_string()?;
+
+        stack.push(string.replace(s1.as_str(), s2.as_str()))
+    }
+
     #[cmd(name = "(-trailing)", stack, args(arg = None))]
     #[cmd(name = "-trailing", stack, args(arg = Some(' ')))]
     #[cmd(name = "-trailing0", stack, args(arg = Some('0')))]
