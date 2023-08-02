@@ -68,6 +68,7 @@ impl<'a> Context<'a> {
     pub fn run(&mut self) -> Result<u8> {
         let mut current = Some(Rc::new(cont::InterpreterCont) as Cont);
         while let Some(cont) = current.take() {
+            //eprintln!("   >>> {}", cont.display_name(&self.dictionary));
             current = cont.run(self)?;
             if current.is_none() {
                 current = self.next.take();

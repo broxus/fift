@@ -10,6 +10,7 @@ use num_bigint::BigInt;
 use num_traits::{One, ToPrimitive, Zero};
 
 use super::cont::*;
+use crate::util::DisplaySliceExt;
 
 pub struct Stack {
     items: Vec<Box<dyn StackValue>>,
@@ -56,6 +57,7 @@ impl Stack {
         anyhow::ensure!(lhs < len, StackError::StackUnderflow(lhs));
         anyhow::ensure!(rhs < len, StackError::StackUnderflow(rhs));
         self.items.swap(len - lhs - 1, len - rhs - 1);
+        //eprintln!("AFTER SWAP: {}", self.display_dump());
         Ok(())
     }
 
@@ -72,6 +74,7 @@ impl Stack {
             *capacity += 1;
         }
         self.items.push(item);
+        //eprintln!("AFTER PUSH: {}", self.display_dump());
         Ok(())
     }
 
@@ -93,6 +96,7 @@ impl Stack {
     }
 
     pub fn pop(&mut self) -> Result<Box<dyn StackValue>> {
+        //eprintln!("BEFORE POP: {}", self.display_dump());
         self.items
             .pop()
             .ok_or(StackError::StackUnderflow(0))
@@ -337,18 +341,17 @@ define_stack_value! {
                     && a.raw_data() == b.raw_data()
                     && a.references() == b.references()
             },
-            fmt_dump(_v, f) = {
-                // TODO: print builder data as hex
-                f.write_str("BC{_data_}")
+            fmt_dump(v, f) = {
+                let bytes = (v.bit_len() + 7) / 8;
+                write!(f, "BC{{{}, bits={}}}", hex::encode(&v.raw_data()[..bytes as usize]), v.bit_len())
             },
             as_builder(v): CellBuilder = Ok(v),
             into_builder,
         },
         Slice(OwnedCellSlice) = {
             eq(a, b) = are_cell_slice_equal(a.pin(), b).unwrap_or_default(),
-            fmt_dump(_v, f) = {
-                // TODO: print slice data as hex
-                f.write_str("CS{_data_}")
+            fmt_dump(v, f) = {
+                write!(f, "CS{{{}}}", v.pin().display_slice_data())
             },
             as_slice(v): CellSlice = Ok(v.pin()),
             into_slice,

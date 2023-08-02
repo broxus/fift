@@ -163,7 +163,7 @@ impl std::fmt::Display for DisplaySliceData<'_, '_> {
         append_tag(&mut buffer, bits);
 
         let mut result = hex::encode(&buffer[..(bits as usize + 7) / 8]);
-        if bits % 8 <= 4 {
+        if (1..=4).contains(&(bits % 8)) {
             result.pop();
         }
         if bits % 4 != 0 {

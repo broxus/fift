@@ -129,7 +129,7 @@ impl CellUtils {
     fn interpret_concat_builders(stack: &mut Stack) -> Result<()> {
         let cb2 = stack.pop_builder()?;
         let mut cb1 = stack.pop_builder()?;
-        cb1.store_raw(cb2.raw_data(), cb1.bit_len())?;
+        cb1.store_raw(cb2.raw_data(), cb2.bit_len())?;
         for cell in cb2.references() {
             cb1.store_reference(cell.clone())?;
         }
@@ -218,7 +218,6 @@ impl CellUtils {
                     } else {
                         BigInt::from_bytes_be(Sign::Plus, buffer)
                     };
-                    println!("INT: {int}");
                     int >>= align;
                     int
                 })
