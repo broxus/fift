@@ -218,10 +218,15 @@ impl StringUtils {
         let sep = stack.pop_string()?;
         let string = stack.pop_string()?;
 
-        let substrings = string
+        let mut substrings = string
             .split(sep.as_str())
             .map(|s| Box::new(s.to_string()) as Box<dyn StackValue>)
             .collect::<Vec<_>>();
+
+        if sep.is_empty() {
+            substrings.remove(0);
+            substrings.pop();
+        }
 
         stack.push(substrings)
     }
