@@ -254,4 +254,35 @@ impl FiftModule for BaseModule {
         };
         ctx.stack.push_bool(exists)
     }
+
+    #[cmd(name = "file>B")]
+    fn interpret_read_file(ctx: &mut Context) -> Result<()> {
+        let name = ctx.stack.pop_string()?;
+        let data = ctx.env.read_file(name.as_str())?;
+        ctx.stack.push(data)
+    }
+
+    #[cmd(name = "filepart>B")]
+    fn interpret_read_file_part(ctx: &mut Context) -> Result<()> {
+        let size = ctx.stack.pop_usize()? as u64;
+        let offset = ctx.stack.pop_usize()? as u64;
+        let name = ctx.stack.pop_string()?;
+        let data = ctx.env.read_file_part(name.as_str(), offset, size)?;
+        ctx.stack.push(data)
+    }
+
+    #[cmd(name = "B>file")]
+    fn interpret_write_file(ctx: &mut Context) -> Result<()> {
+        let name = ctx.stack.pop_string()?;
+        let data = ctx.stack.pop_bytes()?;
+        ctx.env.write_file(name.as_str(), data.as_slice())?;
+        Ok(())
+    }
+
+    #[cmd(name = "file-exists?")]
+    fn interpret_file_exists(ctx: &mut Context) -> Result<()> {
+        let name = ctx.stack.pop_string()?;
+        let exists = ctx.env.file_exists(&name);
+        ctx.stack.push_bool(exists)
+    }
 }
