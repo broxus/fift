@@ -4,6 +4,7 @@ use std::process::ExitCode;
 use anyhow::Result;
 use argh::FromArgs;
 
+use fift::core::lexer::LexerPosition;
 use fift::core::{Environment, SourceBlock};
 
 use self::env::SystemEnvironment;
@@ -82,29 +83,67 @@ fn main() -> Result<ExitCode> {
     // Execute
     match ctx.run() {
         Ok(exit_code) => Ok(ExitCode::from(!exit_code)),
-        Err(e) => {
-            use ariadne::{Color, Label, Report, ReportKind, Source};
-
+        Err(error) => {
             if let Some(next) = ctx.next {
                 eprintln!("Backtrace:\n{}\n", next.display_backtrace(&ctx.dictionary));
             }
 
             let Some(pos) = ctx.input.get_position() else {
-                return Err(e);
+                return Err(error);
             };
 
-            let id = pos.source_block_name;
-            Report::build(ReportKind::Error, id, 0)
-                .with_message(format!("{e:?}"))
-                .with_label(
-                    Label::new((id, pos.line_offset_start..pos.line_offset_end))
-                        .with_color(Color::Red),
-                )
-                .finish()
-                .eprint((id, Source::from(pos.line)))
-                .unwrap();
+            eprintln!("{}", Report { pos, error });
 
             Ok(ExitCode::FAILURE)
         }
+    }
+}
+
+struct Report<'a, E> {
+    pos: LexerPosition<'a>,
+    error: E,
+}
+
+impl<E> std::fmt::Display for Report<'_, E>
+where
+    E: std::fmt::Debug,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        use console::style;
+
+        let line_number = self.pos.line_number.to_string();
+        let offset_len = line_number.len();
+        let offset = format!("{:offset_len$}", "");
+
+        let arrow = style("-->").blue().bold();
+        let block = style("|").blue().bold();
+        let line_number = style(line_number).blue().bold();
+
+        let line = self.pos.line.trim_end();
+        let (line_start, rest) = line.split_at(self.pos.word_start);
+        let (underlined, line_end) = rest.split_at(self.pos.word_end - self.pos.word_start);
+
+        let line_start_len = line_start.len();
+        let underlined_len = underlined.len();
+
+        write!(
+            f,
+            "{}{:?}\n\
+            {offset}{arrow} {}:{}:{}\n\
+            {offset} {block}\n\
+            {line_number} {block} {}{}{}\n\
+            {offset} {block} {:line_start_len$}{}\n\
+            {offset} {block}",
+            style("Error: ").red(),
+            style(&self.error).bold(),
+            self.pos.source_block_name,
+            self.pos.line_number,
+            self.pos.word_start + 1,
+            line_start,
+            style(underlined).red(),
+            line_end,
+            "",
+            style(format!("{:->1$}", "", underlined_len)).red(),
+        )
     }
 }

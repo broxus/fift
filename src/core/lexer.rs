@@ -24,9 +24,9 @@ impl Lexer {
             offset,
             source_block_name: input.block.name(),
             line: &input.line,
-            line_offset_start: std::cmp::min(input.prev_line_offset + 1, input.line_offset),
-            line_offset_end: input.line_offset,
-            line_number: input.line_number.unwrap_or_default(),
+            word_start: std::cmp::min(input.prev_line_offset, input.line_offset),
+            word_end: input.line_offset,
+            line_number: input.line_number,
         })
     }
 
@@ -118,8 +118,8 @@ pub struct LexerPosition<'a> {
     pub offset: usize,
     pub source_block_name: &'a str,
     pub line: &'a str,
-    pub line_offset_start: usize,
-    pub line_offset_end: usize,
+    pub word_start: usize,
+    pub word_end: usize,
     pub line_number: usize,
 }
 
@@ -172,7 +172,7 @@ struct SourceBlockState {
     line: String,
     line_offset: usize,
     prev_line_offset: usize,
-    line_number: Option<usize>,
+    line_number: usize,
 }
 
 impl From<SourceBlock> for SourceBlockState {
@@ -182,21 +182,21 @@ impl From<SourceBlock> for SourceBlockState {
             line: Default::default(),
             line_offset: 0,
             prev_line_offset: 0,
-            line_number: None,
+            line_number: 0,
         }
     }
 }
 
 impl SourceBlockState {
     fn scan_word(&mut self) -> Result<Option<Token<'_>>> {
-        self.prev_line_offset = self.line_offset;
-
         loop {
             if (self.line.is_empty() || self.line_offset >= self.line.len()) && !self.read_line()? {
                 return Ok(None);
             }
 
             self.skip_line_whitespace();
+            self.prev_line_offset = self.line_offset;
+
             let start = self.line_offset;
             self.skip_until(char::is_whitespace);
             let end = self.line_offset;
@@ -212,13 +212,12 @@ impl SourceBlockState {
     }
 
     fn scan_until<P: Delimiter>(&mut self, mut p: P) -> Result<Option<Token<'_>>> {
-        self.prev_line_offset = self.line_offset;
-
         if (self.line.is_empty() || self.line_offset >= self.line.len()) && !self.read_line()? {
             return Ok(None);
         }
 
         let start = self.line_offset;
+        self.prev_line_offset = start;
 
         let mut found = false;
         self.skip_until(|c| {
@@ -239,8 +238,6 @@ impl SourceBlockState {
     }
 
     fn scan_classify(&mut self, classifier: &AsciiCharClassifier) -> Result<Token<'_>> {
-        self.prev_line_offset = self.line_offset;
-
         if (self.line.is_empty() || self.line_offset >= self.line.len()) && !self.read_line()? {
             return Ok(Token { data: "" });
         }
@@ -248,6 +245,7 @@ impl SourceBlockState {
         self.skip_whitespace()?;
 
         let start = self.line_offset;
+        self.prev_line_offset = start;
 
         let mut skip = false;
         let mut empty = true;
@@ -323,15 +321,9 @@ impl SourceBlockState {
     fn read_line(&mut self) -> Result<bool> {
         self.prev_line_offset = 0;
         self.line_offset = 0;
+        self.line_number += 1;
         self.line.clear();
         let n = self.block.buffer_mut().read_line(&mut self.line)?;
-
-        if let Some(line_number) = &mut self.line_number {
-            *line_number += 1;
-        } else {
-            self.line_number = Some(0);
-        }
-
         Ok(n > 0)
     }
 }
