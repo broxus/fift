@@ -26,13 +26,28 @@ Rust implementation of the Fift esoteric language.
 
 ```bash
 curl https://sh.rustup.rs -sSf | sh
-cargo install --git https://github.com/broxus/fift.git
+cargo install --locked fift-cli
 ```
 
 ## Usage
 
-```bash
-fift
+```
+Usage: fift [<source_file>] [-n] [-I <include>] [-L <lib>]
+
+A simple Fift interpreter. Type `bye` to quie, or `words` to get a list of all commands
+
+Positional Arguments:
+  source_file       an optional path to the source file (stdin will be used
+                    otherwise)
+
+Options:
+  -n, --bare        do not preload standard preamble file `Fift.fif`
+  -I, --include     sets color-separated library source include path. If not
+                    indicated, $FIFTPATH is used instead
+  -L, --lib         sets an explicit path to the library source file. If not
+                    indicated, a default one will be used
+  --help            display usage information
+  -v, --version     print version information and exit
 ```
 
 ## Contributing
