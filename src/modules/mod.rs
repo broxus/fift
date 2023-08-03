@@ -169,6 +169,31 @@ impl FiftModule for BaseModule {
         stack.push_raw(tuple)
     }
 
+    #[cmd(name = "[]>$", stack, args(pop_sep = false))] //  []>$   (t[S0, S1, ..., Sn]   -- S)
+    #[cmd(name = "[]>$by", stack, args(pop_sep = true))] // []>$by (t[S0, S1, ..., Sn] s -- S)
+    fn interpret_tuple_strings_join(stack: &mut Stack, pop_sep: bool) -> Result<()> {
+        let sep = if pop_sep {
+            Some(stack.pop_string()?)
+        } else {
+            None
+        };
+        let tuple = stack.pop_tuple_owned()?;
+
+        let mut result = String::new();
+
+        let mut first = true;
+        for item in tuple {
+            if let Some(sep) = sep.as_deref() {
+                if !std::mem::replace(&mut first, false) {
+                    result.push_str(sep);
+                }
+            }
+            result.push_str(item.as_string()?);
+        }
+
+        stack.push(result)
+    }
+
     #[cmd(name = "count", stack)]
     fn interpret_tuple_len(stack: &mut Stack) -> Result<()> {
         let len = stack.pop_tuple()?.len();

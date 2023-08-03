@@ -222,6 +222,7 @@ impl StringUtils {
 
         let substrings = string
             .split(sep.as_str())
+            .filter(|s| !s.is_empty())
             .map(|s| Rc::new(s.to_string()) as Rc<dyn StackValue>)
             .collect::<Vec<_>>();
 
