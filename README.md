@@ -22,6 +22,19 @@
 
 Rust implementation of the Fift esoteric language.
 
+## Installation
+
+```bash
+curl https://sh.rustup.rs -sSf | sh
+cargo install --git https://github.com/broxus/fift.git
+```
+
+## Usage
+
+```bash
+fift
+```
+
 ## Contributing
 
 We welcome contributions to the project! If you notice any issues or errors, feel free to open an issue or submit a pull request.
