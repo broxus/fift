@@ -40,6 +40,7 @@ impl FiftModule for BaseModule {
     #[cmd(name = "integer?", stack, args(ty = StackValueType::Int))]
     #[cmd(name = "string?", stack, args(ty = StackValueType::String))]
     #[cmd(name = "tuple?", stack, args(ty = StackValueType::Tuple))]
+    #[cmd(name = "box?", stack, args(ty = StackValueType::SharedBox))]
     #[cmd(name = "atom?", stack, args(ty = StackValueType::Atom))]
     fn interpret_is_type(stack: &mut Stack, ty: StackValueType) -> Result<()> {
         let is_ty = stack.pop()?.ty() == ty;

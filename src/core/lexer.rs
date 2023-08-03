@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 
 use super::env::SourceBlock;
 use crate::error::UnexpectedEof;
@@ -54,6 +54,14 @@ impl Lexer {
         } else {
             anyhow::bail!(UnexpectedEof)
         }
+    }
+
+    pub fn scan_classify(&mut self, delims: &str, space_class: u8) -> Result<Token<'_>> {
+        let Some(input) = self.blocks.last_mut() else {
+            return Ok(Token { data: "" });
+        };
+        let classifier = AsciiCharClassifier::with_delims(delims, space_class)?;
+        input.scan_classify(&classifier)
     }
 
     pub fn scan_until<P: Delimiter>(&mut self, p: P) -> Result<Token<'_>> {
@@ -230,6 +238,41 @@ impl SourceBlockState {
         })
     }
 
+    fn scan_classify(&mut self, classifier: &AsciiCharClassifier) -> Result<Token<'_>> {
+        self.prev_line_offset = self.line_offset;
+
+        if (self.line.is_empty() || self.line_offset >= self.line.len()) && !self.read_line()? {
+            return Ok(Token { data: "" });
+        }
+
+        self.skip_whitespace()?;
+
+        let start = self.line_offset;
+
+        let mut skip = false;
+        let mut empty = true;
+        self.skip_until(|c| {
+            let class = classifier.classify(c);
+            if class & 0b01 != 0 && !empty {
+                return true;
+            } else if class & 0b10 != 0 {
+                skip = true;
+                return true;
+            }
+
+            empty = false;
+            false
+        });
+
+        if skip {
+            self.skip_symbol();
+        }
+
+        Ok(Token {
+            data: &self.line[start..self.line_offset],
+        })
+    }
+
     fn rewind(&mut self, offset: usize) {
         self.line_offset -= offset;
     }
@@ -286,5 +329,64 @@ impl SourceBlockState {
         }
 
         Ok(n > 0)
+    }
+}
+
+struct AsciiCharClassifier {
+    /// A native representation of `[u2; 256]`
+    data: [u8; 64],
+}
+
+impl AsciiCharClassifier {
+    fn with_delims(delims: &str, space_class: u8) -> Result<Self> {
+        anyhow::ensure!(
+            delims.is_ascii(),
+            "Non-ascii symbols are not supported by character classifier"
+        );
+
+        let mut data = [0u8; 64];
+        let mut set_char_class = |c: u8, mut class: u8| {
+            // Ensure that class is in range 0..=3
+            class &= 0b11;
+
+            let offset = (c & 0b11) * 2;
+
+            // Each byte stores classes (0..=3) for 4 characters.
+            // 0: 00 00 00 11
+            // 1: 00 00 11 00
+            // 2: 00 11 00 00
+            // 3: 11 00 00 00
+            let mask = 0b11 << offset;
+            class <<= offset;
+
+            // Find a byte for the character
+            let p = &mut data[(c >> 2) as usize];
+            // Set character class whithin this byte
+            *p = (*p & !mask) | class;
+        };
+
+        set_char_class(b' ', space_class);
+        set_char_class(b'\t', space_class);
+
+        let mut class = 0b11u8;
+        for &c in delims.as_bytes() {
+            if c == b' ' {
+                class = class.checked_sub(1).context("Too many classes")?;
+            } else {
+                set_char_class(c, class);
+            }
+        }
+
+        Ok(Self { data })
+    }
+
+    fn classify(&self, c: char) -> u8 {
+        if c.is_ascii() {
+            let c = c as u8;
+            let offset = (c & 0b11) * 2;
+            (self.data[(c >> 2) as usize] >> offset) & 0b11
+        } else {
+            0
+        }
     }
 }

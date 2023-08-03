@@ -279,6 +279,27 @@ impl Control {
         ctx.stack.push(token.data.to_owned())
     }
 
+    #[cmd(name = "(word)")]
+    fn interpret_word_ext(ctx: &mut Context) -> Result<()> {
+        const MODE_SKIP_SPACE_EOL: u8 = 0b100;
+        const MODE_SKIP_SPACE: u8 = 0b1000;
+
+        let mode = ctx.stack.pop_smallint_range(0, 11)? as u8;
+        let delims = ctx.stack.pop_string()?;
+
+        // TODO: these flags might be ignored?
+        if mode & MODE_SKIP_SPACE != 0 {
+            if mode & MODE_SKIP_SPACE_EOL != 0 {
+                ctx.input.scan_skip_whitespace()?;
+            } else {
+                ctx.input.skip_line_whitespace();
+            }
+        }
+
+        let word = ctx.input.scan_classify(&delims, mode & 0b11)?;
+        ctx.stack.push(word.data.to_owned())
+    }
+
     #[cmd(name = "skipspc")]
     fn interpret_skipspc(ctx: &mut Context) -> Result<()> {
         ctx.input.scan_skip_whitespace()
