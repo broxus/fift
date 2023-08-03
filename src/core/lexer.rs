@@ -17,6 +17,10 @@ impl Lexer {
         self.blocks.pop().is_some()
     }
 
+    pub fn reset_until_base(&mut self) {
+        self.blocks.truncate(1);
+    }
+
     pub fn get_position(&self) -> Option<LexerPosition<'_>> {
         let offset = self.blocks.len();
         let input = self.blocks.last()?;

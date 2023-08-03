@@ -48,11 +48,13 @@ fn main() -> Result<ExitCode> {
             .unwrap_or_else(|| std::env::var("FIFTPATH").unwrap_or_default()),
     );
 
+    let is_interactive = std::io::stdin().is_terminal();
+
     // Prepare the source block which will be executed
     let mut stdout: Box<dyn std::io::Write> = Box::new(std::io::stdout());
     let base_source_block = if let Some(path) = app.source_file {
         env.include(&path)?
-    } else if std::io::stdin().is_terminal() {
+    } else if is_interactive {
         let mut line_reader = LineReader::new()?;
         stdout = line_reader.create_external_printer()?;
         SourceBlock::new("<stdin>", line_reader)
@@ -82,25 +84,35 @@ fn main() -> Result<ExitCode> {
     }
 
     // Execute
-    match ctx.run() {
-        Ok(exit_code) => Ok(ExitCode::from(!exit_code)),
-        Err(error) => {
-            let Some(pos) = ctx.input.get_position() else {
-                return Err(error);
-            };
+    loop {
+        let error = match ctx.run() {
+            Ok(exit_code) => return Ok(ExitCode::from(!exit_code)),
+            Err(e) => e,
+        };
 
-            eprintln!("{}", Report { pos, error });
-
-            if let Some(next) = ctx.next {
-                eprintln!(
-                    "{}\n{}\n",
-                    style("backtrace:").red(),
-                    style(next.display_backtrace(&ctx.dictionary)).dim()
-                );
-            }
-
-            Ok(ExitCode::FAILURE)
+        if is_interactive {
+            eprintln!("{}", style("!!!").dim())
         }
+
+        if let Some(pos) = ctx.input.get_position() {
+            eprintln!("{}", Report { pos, error });
+        };
+
+        if let Some(next) = ctx.next.take() {
+            eprintln!(
+                "{}\n{}",
+                style("backtrace:").red(),
+                style(next.display_backtrace(&ctx.dictionary)).dim()
+            );
+        }
+
+        if !is_interactive {
+            return Ok(ExitCode::FAILURE);
+        }
+
+        eprintln!();
+        ctx.input.reset_until_base();
+        ctx.stack.clear();
     }
 }
 
