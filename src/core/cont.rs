@@ -35,7 +35,7 @@ impl dyn ContImpl + '_ {
                 let mut cont = self.cont;
                 let mut newline = "";
                 for i in 1..=16 {
-                    write!(f, "{newline}level {i}: {}", cont.display_dump(self.d))?;
+                    write!(f, "{newline}{i:>4}: {}", cont.display_dump(self.d))?;
                     newline = "\n";
                     match cont.up() {
                         Some(next) => cont = next.as_ref(),
@@ -280,8 +280,13 @@ impl SeqCont {
     pub fn make(first: Option<Cont>, second: Option<Cont>) -> Option<Cont> {
         if second.is_none() {
             first
+        } else if let Some(first) = first {
+            Some(Rc::new(Self {
+                first: Some(first),
+                second,
+            }))
         } else {
-            Some(Rc::new(Self { first, second }))
+            second
         }
     }
 }

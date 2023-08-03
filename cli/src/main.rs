@@ -3,6 +3,7 @@ use std::process::ExitCode;
 
 use anyhow::Result;
 use argh::FromArgs;
+use console::style;
 
 use fift::core::lexer::LexerPosition;
 use fift::core::{Environment, SourceBlock};
@@ -84,15 +85,19 @@ fn main() -> Result<ExitCode> {
     match ctx.run() {
         Ok(exit_code) => Ok(ExitCode::from(!exit_code)),
         Err(error) => {
-            if let Some(next) = ctx.next {
-                eprintln!("Backtrace:\n{}\n", next.display_backtrace(&ctx.dictionary));
-            }
-
             let Some(pos) = ctx.input.get_position() else {
                 return Err(error);
             };
 
             eprintln!("{}", Report { pos, error });
+
+            if let Some(next) = ctx.next {
+                eprintln!(
+                    "{}\n{}\n",
+                    style("backtrace:").red(),
+                    style(next.display_backtrace(&ctx.dictionary)).dim()
+                );
+            }
 
             Ok(ExitCode::FAILURE)
         }
@@ -109,8 +114,6 @@ where
     E: std::fmt::Debug,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        use console::style;
-
         let line_number = self.pos.line_number.to_string();
         let offset_len = line_number.len();
         let offset = format!("{:offset_len$}", "");
@@ -134,7 +137,7 @@ where
             {line_number} {block} {}{}{}\n\
             {offset} {block} {:line_start_len$}{}\n\
             {offset} {block}",
-            style("Error: ").red(),
+            style("error: ").red(),
             style(&self.error).bold(),
             self.pos.source_block_name,
             self.pos.line_number,
