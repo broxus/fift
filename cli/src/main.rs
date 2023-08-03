@@ -24,6 +24,10 @@ struct App {
     #[argh(switch, short = 'n')]
     bare: bool,
 
+    /// force interactive mode even if explicit source file names are indicated
+    #[argh(switch, short = 'i')]
+    interactive: bool,
+
     /// sets color-separated library source include path.
     /// If not indicated, $FIFTPATH is used instead
     #[argh(option, short = 'I')]
@@ -34,9 +38,9 @@ struct App {
     #[argh(option, short = 'L')]
     lib: Option<String>,
 
-    /// an optional path to the source file (stdin will be used otherwise)
+    /// a list of source files to execute (stdin will be used if empty)
     #[argh(positional)]
-    source_file: Option<String>,
+    source_files: Vec<String>,
 }
 
 fn main() -> Result<ExitCode> {
@@ -48,39 +52,39 @@ fn main() -> Result<ExitCode> {
             .unwrap_or_else(|| std::env::var("FIFTPATH").unwrap_or_default()),
     );
 
-    let is_interactive = std::io::stdin().is_terminal();
+    let interactive = app.interactive || app.source_files.is_empty();
 
     // Prepare the source block which will be executed
     let mut stdout: Box<dyn std::io::Write> = Box::new(std::io::stdout());
-    let base_source_block = if let Some(path) = app.source_file {
-        env.include(&path)?
-    } else if is_interactive {
+
+    let mut source_blocks = Vec::new();
+
+    if interactive && std::io::stdin().is_terminal() {
         let mut line_reader = LineReader::new()?;
         stdout = line_reader.create_external_printer()?;
-        SourceBlock::new("<stdin>", line_reader)
-    } else {
-        SourceBlock::new("<stdin>", std::io::stdin().lock())
-    };
+        source_blocks.push(SourceBlock::new("<stdin>", line_reader));
+    } else if app.source_files.is_empty() {
+        source_blocks.push(SourceBlock::new("<stdin>", std::io::stdin().lock()));
+    }
+
+    for path in app.source_files.into_iter().rev() {
+        source_blocks.push(env.include(&path)?);
+    }
 
     // Prepare preamble block
-    let library_source_block = if app.bare {
-        None
-    } else if let Some(lib) = &app.lib {
-        Some(env.include(lib)?)
-    } else {
-        Some(SourceBlock::new(
+    if let Some(lib) = &app.lib {
+        source_blocks.push(env.include(lib)?);
+    } else if !app.bare {
+        source_blocks.push(SourceBlock::new(
             "<default Fift.fif>",
             std::io::Cursor::new(include_str!("Fift.fif")),
-        ))
-    };
+        ));
+    }
 
     // Prepare Fift context
-    let mut ctx = fift::Context::new(&mut env, &mut stdout)
-        .with_basic_modules()?
-        .with_source_block(base_source_block);
-
-    if let Some(lib) = library_source_block {
-        ctx.add_source_block(lib);
+    let mut ctx = fift::Context::new(&mut env, &mut stdout).with_basic_modules()?;
+    for source_block in source_blocks {
+        ctx.add_source_block(source_block);
     }
 
     // Execute
@@ -90,7 +94,7 @@ fn main() -> Result<ExitCode> {
             Err(e) => e,
         };
 
-        if is_interactive {
+        if interactive {
             eprintln!("{}", style("!!!").dim())
         }
 
@@ -106,7 +110,7 @@ fn main() -> Result<ExitCode> {
             );
         }
 
-        if !is_interactive {
+        if !interactive {
             return Ok(ExitCode::FAILURE);
         }
 
