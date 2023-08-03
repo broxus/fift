@@ -252,6 +252,10 @@ impl SourceBlockState {
         let mut skip = false;
         let mut empty = true;
         self.skip_until(|c| {
+            if c == '\n' || c == '\r' {
+                return true;
+            }
+
             let class = classifier.classify(c);
             if class & 0b01 != 0 && !empty {
                 return true;

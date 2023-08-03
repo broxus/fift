@@ -1,4 +1,5 @@
 use std::collections::HashSet;
+use std::rc::Rc;
 
 use anyhow::{Context as _, Result};
 use everscale_types::cell::{MAX_BIT_LEN, MAX_REF_COUNT};
@@ -25,9 +26,9 @@ impl CellUtils {
     #[cmd(name = "u,", stack, args(signed = false))]
     fn interpret_store(stack: &mut Stack, signed: bool) -> Result<()> {
         let bits = stack.pop_smallint_range(0, 1023)? as u16;
-        let mut int = stack.pop_int()?;
+        let int = stack.pop_int()?;
         let mut builder = stack.pop_builder()?;
-        store_int_to_builder(&mut builder, &mut int, bits, signed)?;
+        store_int_to_builder(Rc::make_mut(&mut builder), &int, bits, signed)?;
         stack.push_raw(builder)
     }
 
@@ -35,7 +36,7 @@ impl CellUtils {
     fn interpret_store_ref(stack: &mut Stack) -> Result<()> {
         let cell = stack.pop_cell()?;
         let mut builder = stack.pop_builder()?;
-        builder.store_reference(*cell)?;
+        Rc::make_mut(&mut builder).store_reference(cell.as_ref().clone())?;
         stack.push_raw(builder)
     }
 
@@ -43,7 +44,8 @@ impl CellUtils {
     fn interpret_store_str(stack: &mut Stack) -> Result<()> {
         let string = stack.pop_string()?;
         let mut builder = stack.pop_builder()?;
-        builder.store_raw(string.as_bytes(), len_as_bits("string", &*string)?)?;
+        Rc::make_mut(&mut builder)
+            .store_raw(string.as_bytes(), len_as_bits("string", &*string)?)?;
         stack.push_raw(builder)
     }
 
@@ -51,7 +53,8 @@ impl CellUtils {
     fn interpret_store_bytes(stack: &mut Stack) -> Result<()> {
         let bytes = stack.pop_bytes()?;
         let mut builder = stack.pop_builder()?;
-        builder.store_raw(bytes.as_slice(), len_as_bits("byte string", &*bytes)?)?;
+        Rc::make_mut(&mut builder)
+            .store_raw(bytes.as_slice(), len_as_bits("byte string", &*bytes)?)?;
         stack.push_raw(builder)
     }
 
@@ -59,7 +62,7 @@ impl CellUtils {
     fn interpret_store_cellslice(stack: &mut Stack) -> Result<()> {
         let slice = stack.pop_slice()?;
         let mut builder = stack.pop_builder()?;
-        builder.store_slice(slice.apply()?)?;
+        Rc::make_mut(&mut builder).store_slice(slice.apply()?)?;
         stack.push_raw(builder)
     }
 
@@ -72,14 +75,14 @@ impl CellUtils {
             builder.build()?
         };
         let mut builder = stack.pop_builder()?;
-        builder.store_reference(cell)?;
+        Rc::make_mut(&mut builder).store_reference(cell)?;
         stack.push_raw(builder)
     }
 
     #[cmd(name = "b>", stack, args(is_exotic = false))]
     #[cmd(name = "b>spec", stack, args(is_exotic = true))]
     fn interpret_store_end(stack: &mut Stack, is_exotic: bool) -> Result<()> {
-        let mut item = stack.pop_builder()?;
+        let mut item = stack.pop_builder_owned()?;
         item.set_exotic(is_exotic);
         let cell = item.build()?;
         stack.push(cell)
@@ -128,9 +131,12 @@ impl CellUtils {
     fn interpret_concat_builders(stack: &mut Stack) -> Result<()> {
         let cb2 = stack.pop_builder()?;
         let mut cb1 = stack.pop_builder()?;
-        cb1.store_raw(cb2.raw_data(), cb2.bit_len())?;
-        for cell in cb2.references() {
-            cb1.store_reference(cell.clone())?;
+        {
+            let cb1 = Rc::make_mut(&mut cb1);
+            cb1.store_raw(cb2.raw_data(), cb2.bit_len())?;
+            for cell in cb2.references() {
+                cb1.store_reference(cell.clone())?;
+            }
         }
         stack.push_raw(cb1)
     }
@@ -168,7 +174,7 @@ impl CellUtils {
     #[cmd(name = "hashB", stack, args(as_uint = false))]
     fn interpret_cell_hash(stack: &mut Stack, as_uint: bool) -> Result<()> {
         let bytes = stack.pop_bytes()?;
-        let hash = sha2::Sha256::digest(*bytes);
+        let hash = sha2::Sha256::digest(&*bytes);
         if as_uint {
             stack.push(BigInt::from_bytes_be(Sign::Plus, &hash))
         } else {
@@ -181,7 +187,7 @@ impl CellUtils {
     #[cmd(name = "<s", stack)]
     fn interpret_from_cell(stack: &mut Stack) -> Result<()> {
         let item = stack.pop_cell()?;
-        stack.push(OwnedCellSlice::new(*item))
+        stack.push(OwnedCellSlice::new(item.as_ref().clone()))
     }
 
     #[cmd(name = "i@", stack, args(sgn = true, advance = false, quiet = false))]
@@ -227,7 +233,8 @@ impl CellUtils {
             Ok(int) => {
                 stack.push_int(int)?;
                 if advance {
-                    raw_cs.set_range(cs.range());
+                    let range = cs.range();
+                    Rc::make_mut(&mut raw_cs).set_range(range);
                     stack.push_raw(raw_cs)?;
                 }
             }
@@ -269,7 +276,8 @@ impl CellUtils {
                 }
 
                 if advance {
-                    cs_raw.set_range(cs.range());
+                    let range = cs.range();
+                    Rc::make_mut(&mut cs_raw).set_range(range);
                     stack.push_raw(cs_raw)?;
                 }
             }
@@ -298,7 +306,8 @@ impl CellUtils {
             Ok(cell) => {
                 stack.push(cell)?;
                 if advance {
-                    cs_raw.set_range(cs.range());
+                    let range = cs.range();
+                    Rc::make_mut(&mut cs_raw).set_range(range);
                     stack.push_raw(cs_raw)?;
                 }
             }
@@ -366,14 +375,14 @@ impl CellUtils {
     #[cmd(name = "B>boc", stack)]
     fn interpret_boc_deserialize(stack: &mut Stack) -> Result<()> {
         let bytes = stack.pop_bytes()?;
-        let cell = Boc::decode(*bytes)?;
+        let cell = Boc::decode(&*bytes)?;
         stack.push(cell)
     }
 
     #[cmd(name = "base64>boc", stack)]
     fn interpret_boc_deserialize_base64(stack: &mut Stack) -> Result<()> {
         let bytes = stack.pop_string()?;
-        let cell = Boc::decode_base64(*bytes)?;
+        let cell = Boc::decode_base64(&*bytes)?;
         stack.push(cell)
     }
 

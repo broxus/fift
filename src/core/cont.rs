@@ -150,7 +150,7 @@ impl ContImpl for InterpreterCont {
                 }
             };
 
-            ctx.exit_interpret.store(Box::new(
+            ctx.exit_interpret.store(Rc::new(
                 ctx.next
                     .clone()
                     .unwrap_or_else(|| ctx.dictionary.make_nop()),
@@ -531,7 +531,7 @@ impl ContImpl for IntLitCont {
     }
 }
 
-pub struct LitCont(pub Box<dyn StackValue>);
+pub struct LitCont(pub Rc<dyn StackValue>);
 
 impl ContImpl for LitCont {
     fn run(self: Rc<Self>, ctx: &mut Context) -> Result<Option<Cont>> {
@@ -548,7 +548,7 @@ impl ContImpl for LitCont {
     }
 }
 
-pub struct MultiLitCont(pub Vec<Box<dyn StackValue>>);
+pub struct MultiLitCont(pub Vec<Rc<dyn StackValue>>);
 
 impl ContImpl for MultiLitCont {
     fn run(self: Rc<Self>, ctx: &mut Context) -> Result<Option<Cont>> {

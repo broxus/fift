@@ -1,3 +1,5 @@
+use std::rc::Rc;
+
 use anyhow::{Context as _, Result};
 
 use crate::core::*;
@@ -133,14 +135,14 @@ impl FiftModule for BaseModule {
     fn interpret_tuple_push(stack: &mut Stack) -> Result<()> {
         let value = stack.pop()?;
         let mut tuple = stack.pop_tuple()?;
-        tuple.push(value);
+        Rc::make_mut(&mut tuple).push(value);
         stack.push_raw(tuple)
     }
 
     #[cmd(name = "tpop", stack)]
     fn interpret_tuple_pop(stack: &mut Stack) -> Result<()> {
         let mut tuple = stack.pop_tuple()?;
-        let last = tuple.pop().context("Tuple underflow")?;
+        let last = Rc::make_mut(&mut tuple).pop().context("Tuple underflow")?;
         stack.push_raw(tuple)?;
         stack.push_raw(last)
     }
@@ -151,8 +153,9 @@ impl FiftModule for BaseModule {
         let tuple = stack.pop_tuple()?;
         let value = tuple
             .get(idx)
-            .with_context(|| format!("Index {idx} is out of the tuple range"))?;
-        stack.push_raw(dyn_clone::clone_box(value.as_ref()))
+            .with_context(|| format!("Index {idx} is out of the tuple range"))?
+            .clone();
+        stack.push_raw(value)
     }
 
     #[cmd(name = "[]=", stack)]
@@ -160,7 +163,7 @@ impl FiftModule for BaseModule {
         let idx = stack.pop_usize()?;
         let value = stack.pop()?;
         let mut tuple = stack.pop_tuple()?;
-        *tuple
+        *Rc::make_mut(&mut tuple)
             .get_mut(idx)
             .with_context(|| format!("Index {idx} is out of the tuple range"))? = value;
         stack.push_raw(tuple)
@@ -191,7 +194,7 @@ impl FiftModule for BaseModule {
         } else {
             0
         };
-        let tuple = stack.pop_tuple()?;
+        let tuple = stack.pop_tuple_owned()?;
         if !pop_count {
             n = tuple.len();
             anyhow::ensure!(n <= 255, "Cannot untuple a tuple with {n} items");
@@ -203,7 +206,7 @@ impl FiftModule for BaseModule {
             );
         }
 
-        for item in *tuple {
+        for item in tuple {
             stack.push_raw(item)?;
         }
 
@@ -212,6 +215,14 @@ impl FiftModule for BaseModule {
         }
 
         Ok(())
+    }
+
+    #[cmd(name = "allot", stack)]
+    fn interpret_allot(stack: &mut Stack) -> Result<()> {
+        let n = stack.pop_smallint_range(0, u32::MAX)?;
+        let mut tuple = Vec::<Rc<dyn StackValue>>::new();
+        tuple.resize_with(n as usize, || Rc::new(SharedBox::default()));
+        stack.push(tuple)
     }
 
     #[cmd(name = "now")]

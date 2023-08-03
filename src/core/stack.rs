@@ -12,7 +12,7 @@ use super::cont::*;
 use crate::util::DisplaySliceExt;
 
 pub struct Stack {
-    items: Vec<Box<dyn StackValue>>,
+    items: Vec<Rc<dyn StackValue>>,
     capacity: Option<usize>,
     atoms: Atoms,
 }
@@ -43,12 +43,10 @@ impl Stack {
         Ok(())
     }
 
-    pub fn fetch(&self, idx: usize) -> Result<Box<dyn StackValue>> {
+    pub fn fetch(&self, idx: usize) -> Result<Rc<dyn StackValue>> {
         let len = self.items.len();
         anyhow::ensure!(idx < len, StackError::StackUnderflow(idx));
-
-        let item = self.items[len - idx - 1].as_ref();
-        Ok(dyn_clone::clone_box(item))
+        Ok(self.items[len - idx - 1].clone())
     }
 
     pub fn swap(&mut self, lhs: usize, rhs: usize) -> Result<()> {
@@ -61,10 +59,10 @@ impl Stack {
     }
 
     pub fn push<T: StackValue + 'static>(&mut self, item: T) -> Result<()> {
-        self.push_raw(Box::new(item))
+        self.push_raw(Rc::new(item))
     }
 
-    pub fn push_raw(&mut self, item: Box<dyn StackValue>) -> Result<()> {
+    pub fn push_raw(&mut self, item: Rc<dyn StackValue>) -> Result<()> {
         if let Some(capacity) = &mut self.capacity {
             anyhow::ensure!(
                 self.items.len() < *capacity,
@@ -94,7 +92,7 @@ impl Stack {
         self.push(cont)
     }
 
-    pub fn pop(&mut self) -> Result<Box<dyn StackValue>> {
+    pub fn pop(&mut self) -> Result<Rc<dyn StackValue>> {
         //eprintln!("BEFORE POP: {}", self.display_dump());
         self.items
             .pop()
@@ -144,51 +142,72 @@ impl Stack {
         anyhow::bail!(StackError::InvalidChar(item.to_string()))
     }
 
-    pub fn pop_int(&mut self) -> Result<Box<BigInt>> {
+    pub fn pop_int(&mut self) -> Result<Rc<BigInt>> {
         self.pop()?.into_int()
     }
 
-    pub fn pop_string(&mut self) -> Result<Box<String>> {
+    pub fn pop_string(&mut self) -> Result<Rc<String>> {
         self.pop()?.into_string()
     }
 
-    pub fn pop_bytes(&mut self) -> Result<Box<Vec<u8>>> {
+    pub fn pop_string_owned(&mut self) -> Result<String> {
+        Ok(match Rc::try_unwrap(self.pop()?.into_string()?) {
+            Ok(inner) => inner,
+            Err(rc) => rc.as_ref().clone(),
+        })
+    }
+
+    pub fn pop_bytes(&mut self) -> Result<Rc<Vec<u8>>> {
         self.pop()?.into_bytes()
     }
 
-    pub fn pop_cell(&mut self) -> Result<Box<Cell>> {
+    pub fn pop_cell(&mut self) -> Result<Rc<Cell>> {
         self.pop()?.into_cell()
     }
 
-    pub fn pop_builder(&mut self) -> Result<Box<CellBuilder>> {
+    pub fn pop_builder(&mut self) -> Result<Rc<CellBuilder>> {
         self.pop()?.into_builder()
     }
 
-    pub fn pop_slice(&mut self) -> Result<Box<OwnedCellSlice>> {
+    pub fn pop_builder_owned(&mut self) -> Result<CellBuilder> {
+        Ok(match Rc::try_unwrap(self.pop()?.into_builder()?) {
+            Ok(inner) => inner,
+            Err(rc) => rc.as_ref().clone(),
+        })
+    }
+
+    pub fn pop_slice(&mut self) -> Result<Rc<OwnedCellSlice>> {
         self.pop()?.into_slice()
     }
 
-    pub fn pop_cont(&mut self) -> Result<Box<Cont>> {
+    pub fn pop_cont(&mut self) -> Result<Rc<Cont>> {
         self.pop()?.into_cont()
     }
 
-    pub fn pop_word_list(&mut self) -> Result<Box<WordList>> {
+    pub fn pop_word_list(&mut self) -> Result<Rc<WordList>> {
         self.pop()?.into_word_list()
     }
 
-    pub fn pop_tuple(&mut self) -> Result<Box<StackTuple>> {
+    pub fn pop_tuple(&mut self) -> Result<Rc<StackTuple>> {
         self.pop()?.into_tuple()
     }
 
-    pub fn pop_shared_box(&mut self) -> Result<Box<SharedBox>> {
+    pub fn pop_tuple_owned(&mut self) -> Result<StackTuple> {
+        Ok(match Rc::try_unwrap(self.pop()?.into_tuple()?) {
+            Ok(inner) => inner,
+            Err(rc) => rc.as_ref().clone(),
+        })
+    }
+
+    pub fn pop_shared_box(&mut self) -> Result<Rc<SharedBox>> {
         self.pop()?.into_shared_box()
     }
 
-    pub fn pop_atom(&mut self) -> Result<Box<Atom>> {
+    pub fn pop_atom(&mut self) -> Result<Rc<Atom>> {
         self.pop()?.into_atom()
     }
 
-    pub fn items(&self) -> &[Box<dyn StackValue>] {
+    pub fn items(&self) -> &[Rc<dyn StackValue>] {
         &self.items
     }
 
@@ -268,7 +287,7 @@ macro_rules! define_stack_value {
                 }.into())
             })*
 
-            $(fn $into(self: Box<Self>) -> Result<Box<$ty>> {
+            $(fn $into(self: Rc<Self>) -> Result<Rc<$ty>> {
                 Err(StackError::UnexpectedType {
                     expected: $value_type::$name,
                     actual: self.ty(),
@@ -304,7 +323,7 @@ macro_rules! define_stack_value {
                 $cast_body
             }
 
-            fn $into(self: Box<Self>) -> Result<Box<$ty>> {
+            fn $into(self: Rc<Self>) -> Result<Rc<$ty>> {
                 Ok(self)
             }
 
@@ -394,8 +413,8 @@ define_stack_value! {
             as_word_list(v): &WordList = Ok(v),
             into_word_list,
             {
-                fn into_cont(self: Box<Self>) -> Result<Box<Cont>> {
-                    Ok(Box::new(self.finish()))
+                fn into_cont(self: Rc<Self>) -> Result<Rc<Cont>> {
+                    Ok(Rc::new(self.finish()))
                 }
             }
         },
@@ -507,7 +526,7 @@ impl dyn StackValue + '_ {
     }
 }
 
-pub type StackTuple = Vec<Box<dyn StackValue>>;
+pub type StackTuple = Vec<Rc<dyn StackValue>>;
 
 #[derive(Clone)]
 pub struct OwnedCellSlice {
@@ -568,14 +587,14 @@ pub struct WordList {
 }
 
 impl WordList {
-    pub fn finish(self) -> Cont {
+    pub fn finish(self: Rc<Self>) -> Cont {
         if self.items.len() == 1 {
-            return self.items.into_iter().next().unwrap();
+            return self.items.first().unwrap().clone();
         }
 
         Rc::new(ListCont {
             after: None,
-            list: Rc::new(self),
+            list: self,
             pos: 0,
         })
     }
@@ -596,27 +615,27 @@ impl PartialEq for WordList {
 
 #[derive(Clone)]
 pub struct SharedBox {
-    value: Rc<RefCell<Box<dyn StackValue>>>,
+    value: Rc<RefCell<Rc<dyn StackValue>>>,
 }
 
 impl Default for SharedBox {
     fn default() -> Self {
-        Self::new(Box::new(()))
+        Self::new(Rc::new(()))
     }
 }
 
 impl SharedBox {
-    pub fn new(value: Box<dyn StackValue>) -> Self {
+    pub fn new(value: Rc<dyn StackValue>) -> Self {
         Self {
             value: Rc::new(RefCell::new(value)),
         }
     }
 
-    pub fn store(&self, value: Box<dyn StackValue>) {
+    pub fn store(&self, value: Rc<dyn StackValue>) {
         *self.value.borrow_mut() = value;
     }
 
-    pub fn fetch(&self) -> Box<dyn StackValue> {
+    pub fn fetch(&self) -> Rc<dyn StackValue> {
         self.value.borrow().clone()
     }
 }

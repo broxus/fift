@@ -26,23 +26,23 @@ impl Control {
     #[cmd(name = "execute", tail)]
     fn interpret_execute(ctx: &mut Context) -> Result<Option<Cont>> {
         let cont = ctx.stack.pop_cont()?;
-        Ok(Some(*cont))
+        Ok(Some(cont.as_ref().clone()))
     }
 
     #[cmd(name = "times", tail)]
     fn interpret_execute_times(ctx: &mut Context) -> Result<Option<Cont>> {
         let count = ctx.stack.pop_smallint_range(0, 1000000000)? as usize;
-        let body = ctx.stack.pop_cont()?;
+        let body = ctx.stack.pop_cont()?.as_ref().clone();
         Ok(match count {
             0 => None,
-            1 => Some(*body),
+            1 => Some(body),
             _ => {
                 ctx.next = Some(Rc::new(cont::TimesCont {
-                    body: Some(Rc::clone(&body)),
+                    body: Some(body.clone()),
                     after: ctx.next.take(),
                     count: count - 1,
                 }));
-                Some(*body)
+                Some(body)
             }
         })
     }
@@ -51,7 +51,7 @@ impl Control {
     fn interpret_if(ctx: &mut Context) -> Result<Option<Cont>> {
         let true_ref = ctx.stack.pop_cont()?;
         Ok(if ctx.stack.pop_bool()? {
-            Some(*true_ref)
+            Some(true_ref.as_ref().clone())
         } else {
             None
         })
@@ -63,7 +63,7 @@ impl Control {
         Ok(if ctx.stack.pop_bool()? {
             None
         } else {
-            Some(*false_ref)
+            Some(false_ref.as_ref().clone())
         })
     }
 
@@ -72,33 +72,33 @@ impl Control {
         let false_ref = ctx.stack.pop_cont()?;
         let true_ref = ctx.stack.pop_cont()?;
         Ok(Some(if ctx.stack.pop_bool()? {
-            *true_ref
+            true_ref.as_ref().clone()
         } else {
-            *false_ref
+            false_ref.as_ref().clone()
         }))
     }
 
     #[cmd(name = "while", tail)]
     fn interpret_while(ctx: &mut Context) -> Result<Option<Cont>> {
-        let body = ctx.stack.pop_cont()?;
-        let cond = ctx.stack.pop_cont()?;
+        let body = ctx.stack.pop_cont()?.as_ref().clone();
+        let cond = ctx.stack.pop_cont()?.as_ref().clone();
         ctx.next = Some(Rc::new(cont::WhileCont {
-            condition: Some(Rc::clone(&cond)),
-            body: Some(*body),
+            condition: Some(cond.clone()),
+            body: Some(body),
             after: ctx.next.take(),
             running_body: true,
         }));
-        Ok(Some(*cond))
+        Ok(Some(cond))
     }
 
     #[cmd(name = "until", tail)]
     fn interpret_until(ctx: &mut Context) -> Result<Option<Cont>> {
-        let body = ctx.stack.pop_cont()?;
+        let body = ctx.stack.pop_cont()?.as_ref().clone();
         ctx.next = Some(Rc::new(cont::UntilCont {
-            body: Some(Rc::clone(&body)),
+            body: Some(body.clone()),
             after: ctx.next.take(),
         }));
-        Ok(Some(*body))
+        Ok(Some(body))
     }
 
     // === Compiler control ===
@@ -174,13 +174,11 @@ impl Control {
 
     #[cmd(name = "find")]
     fn interpret_find(ctx: &mut Context) -> Result<()> {
-        let mut word = ctx.stack.pop_string()?;
+        let word = ctx.stack.pop_string()?;
         let entry = match ctx.dictionary.lookup(&word) {
             Some(entry) => Some(entry),
-            None => {
-                word.push(' ');
-                ctx.dictionary.lookup(&word)
-            }
+            // TODO: split dictionaries for prefix words
+            None => ctx.dictionary.lookup(&format!("{word} ")),
         };
         match entry {
             Some(entry) => {
@@ -200,7 +198,7 @@ impl Control {
         define_word(
             &mut ctx.dictionary,
             name.data.to_owned(),
-            *cont,
+            cont.as_ref().clone(),
             DefMode {
                 active: false,
                 prefix: false,
@@ -220,9 +218,9 @@ impl Control {
                 }
             }
         };
-        let word = ctx.stack.pop_string()?;
-        let cont = ctx.stack.pop_cont()?;
-        define_word(&mut ctx.dictionary, *word, *cont, mode)
+        let word = ctx.stack.pop_string_owned()?;
+        let cont = ctx.stack.pop_cont()?.as_ref().clone();
+        define_word(&mut ctx.dictionary, word, cont, mode)
     }
 
     #[cmd(name = ":", active, args(active = false, prefix = false))]
@@ -249,7 +247,7 @@ impl Control {
     #[cmd(name = "(forget)", args(word_from_stack = true))]
     fn interpret_forget(ctx: &mut Context, word_from_stack: bool) -> Result<()> {
         let mut word = if word_from_stack {
-            *ctx.stack.pop_string()?
+            ctx.stack.pop_string_owned()?
         } else {
             let word = ctx.input.scan_word()?.ok_or(UnexpectedEof)?;
             word.data.to_owned()
@@ -319,7 +317,7 @@ impl Control {
         let cont = ctx.exit_interpret.fetch();
         ctx.next = None;
         Ok(if !cont.is_null() {
-            Some(*cont.into_cont()?)
+            Some(cont.into_cont()?.as_ref().clone())
         } else {
             None
         })
@@ -328,7 +326,7 @@ impl Control {
     #[cmd(name = "abort")]
     fn interpret_abort(ctx: &mut Context) -> Result<()> {
         ctx.stdout.flush()?;
-        let reason = *ctx.stack.pop_string()?;
+        let reason = ctx.stack.pop_string()?.as_ref().clone();
         Err(ExecutionAborted { reason }.into())
     }
 

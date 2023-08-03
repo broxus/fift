@@ -1,3 +1,5 @@
+use std::rc::Rc;
+
 use anyhow::Result;
 use everscale_types::cell::DefaultFinalizer;
 use everscale_types::dict::*;
@@ -26,7 +28,7 @@ impl DictUtils {
     fn interpret_store_dict(stack: &mut Stack) -> Result<()> {
         let maybe_cell = pop_maybe_cell(stack)?;
         let mut builder = stack.pop_builder()?;
-        maybe_cell.store_into(&mut builder, &mut Cell::default_finalizer())?;
+        maybe_cell.store_into(Rc::make_mut(&mut builder), &mut Cell::default_finalizer())?;
         stack.push_raw(builder)
     }
 
@@ -38,7 +40,8 @@ impl DictUtils {
         let cell = Option::<Cell>::load_from(&mut cs)?;
         push_maybe_cell(stack, cell)?;
         if fetch {
-            cs_raw.set_range(cs.range());
+            let range = cs.range();
+            Rc::make_mut(&mut cs_raw).set_range(range);
             stack.push_raw(cs_raw)?;
         }
         Ok(())
@@ -69,9 +72,9 @@ impl DictUtils {
         );
 
         let value = if b {
-            OwnedCellSlice::new(stack.pop_builder()?.build()?)
+            OwnedCellSlice::new(stack.pop_builder_owned()?.build()?)
         } else {
-            *stack.pop_slice()?
+            stack.pop_slice()?.as_ref().clone()
         };
         let value = value.apply()?;
 
@@ -170,20 +173,20 @@ fn pop_maybe_cell(stack: &mut Stack) -> Result<Option<Cell>> {
     Ok(if value.is_null() {
         None
     } else {
-        Some(*value.into_cell()?)
+        Some(value.into_cell()?.as_ref().clone())
     })
 }
 
 fn pop_dict_key(stack: &mut Stack, key_mode: KeyMode, bits: u16) -> Result<OwnedCellSlice> {
     let signed = match key_mode {
-        KeyMode::Slice => return Ok(*stack.pop_slice()?),
+        KeyMode::Slice => return Ok(stack.pop_slice()?.as_ref().clone()),
         KeyMode::Signed => true,
         KeyMode::Unsigned => false,
     };
 
     let mut builder = CellBuilder::new();
-    let mut int = stack.pop_int()?;
-    store_int_to_builder(&mut builder, &mut int, bits, signed)?;
+    let int = stack.pop_int()?;
+    store_int_to_builder(&mut builder, &int, bits, signed)?;
     Ok(OwnedCellSlice::new(builder.build()?))
 }
 

@@ -11,10 +11,10 @@ impl VmUtils {
     #[init]
     fn init(d: &mut Dictionary) -> Result<()> {
         thread_local! {
-            static VM_LIBRARIES: SharedBox = SharedBox::new(Box::new(()));
+            static VM_LIBRARIES: Rc<dyn StackValue> = Rc::new(SharedBox::default());
         }
 
-        let vm_libraries: Box<dyn StackValue> = Box::new(VM_LIBRARIES.with(|b| b.clone()));
+        let vm_libraries = VM_LIBRARIES.with(|b| b.clone());
 
         d.define_word(
             "vmlibs ",

@@ -84,7 +84,7 @@ impl<'a> Context<'a> {
         let cont = self.stack.pop_cont()?;
         let count = self.stack.pop_smallint_range(0, 255)? as usize;
         self.stack.check_underflow(count)?;
-        Ok(*cont)
+        Ok(cont.as_ref().clone())
     }
 
     pub(crate) fn compile_stack_top(&mut self) -> Result<()> {
@@ -105,10 +105,13 @@ impl<'a> Context<'a> {
         };
 
         let mut word_list = self.stack.pop_word_list()?;
-        word_list.items.extend(cont);
+        {
+            let word_list = Rc::make_mut(&mut word_list);
+            word_list.items.extend(cont);
 
-        if !self.dictionary.is_nop(&**word_def) {
-            word_list.items.push(*word_def);
+            if !self.dictionary.is_nop(&**word_def) {
+                word_list.items.push(Rc::clone(&word_def));
+            }
         }
 
         self.stack.push_raw(word_list)

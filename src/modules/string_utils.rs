@@ -1,3 +1,5 @@
+use std::rc::Rc;
+
 use anyhow::Result;
 use num_bigint::{BigInt, Sign};
 use num_traits::Num;
@@ -68,7 +70,7 @@ impl StringUtils {
     fn interpret_hold(stack: &mut Stack) -> Result<()> {
         let c = stack.pop_smallint_char()?;
         let mut string = stack.pop_string()?;
-        string.push(c);
+        Rc::make_mut(&mut string).push(c);
         stack.push_raw(string)
     }
 
@@ -115,8 +117,8 @@ impl StringUtils {
         anyhow::ensure!(at <= head.len(), "Index out of range");
         anyhow::ensure!(head.is_char_boundary(at), "Index is not the char boundary");
 
-        let tail = Box::new(head[at..].to_owned());
-        head.truncate(at);
+        let tail = Rc::new(head[at..].to_owned());
+        Rc::make_mut(&mut head).truncate(at);
 
         stack.push_raw(head)?;
         stack.push_raw(tail)
@@ -126,7 +128,7 @@ impl StringUtils {
     fn interpret_str_concat(stack: &mut Stack) -> Result<()> {
         let tail = stack.pop_string()?;
         let mut head = stack.pop_string()?;
-        head.push_str(&tail);
+        Rc::make_mut(&mut head).push_str(&tail);
         stack.push_raw(head)
     }
 
@@ -147,7 +149,7 @@ impl StringUtils {
     #[cmd(name = "$reverse", stack)]
     fn interpret_str_reverse(stack: &mut Stack) -> Result<()> {
         let mut string = stack.pop_string()?;
-        reverse_utf8_string_inplace(string.as_mut_str());
+        reverse_utf8_string_inplace(Rc::make_mut(&mut string).as_mut_str());
         stack.push_raw(string)
     }
 
@@ -189,7 +191,7 @@ impl StringUtils {
         let string = stack.pop_string()?;
         let symbols = string
             .chars()
-            .map(|c| Box::new(c.to_string()) as Box<dyn StackValue>)
+            .map(|c| Rc::new(c.to_string()) as Rc<dyn StackValue>)
             .collect::<Vec<_>>();
 
         stack.push(symbols)
@@ -220,7 +222,7 @@ impl StringUtils {
 
         let substrings = string
             .split(sep.as_str())
-            .map(|s| Box::new(s.to_string()) as Box<dyn StackValue>)
+            .map(|s| Rc::new(s.to_string()) as Rc<dyn StackValue>)
             .collect::<Vec<_>>();
 
         stack.push(substrings)
@@ -256,7 +258,10 @@ impl StringUtils {
             None => stack.pop_smallint_char()?,
         };
         let mut string = stack.pop_string()?;
-        string.truncate(string.trim_end_matches(arg).len());
+        {
+            let string = Rc::make_mut(&mut string);
+            string.truncate(string.trim_end_matches(arg).len());
+        }
         stack.push_raw(string)
     }
 
@@ -284,9 +289,9 @@ impl StringUtils {
     fn interpret_bytes_to_hex(stack: &mut Stack, upper: bool) -> Result<()> {
         let bytes = stack.pop_bytes()?;
         let string = if upper {
-            hex::encode_upper(*bytes)
+            hex::encode_upper(&*bytes)
         } else {
-            hex::encode(*bytes)
+            hex::encode(&*bytes)
         };
         stack.push(string)
     }
@@ -294,17 +299,18 @@ impl StringUtils {
     #[cmd(name = "x>B", stack, args(partial = false))]
     #[cmd(name = "x>B?", stack, args(partial = true))]
     fn interpret_hex_to_bytes(stack: &mut Stack, partial: bool) -> Result<()> {
-        let mut string = stack.pop_string()?;
+        let string = stack.pop_string()?;
+        let mut string = string.as_str();
         if partial {
             let len = string
                 .find(|c: char| !c.is_ascii_hexdigit())
                 .unwrap_or(string.len())
                 & (usize::MAX - 1);
-            string.truncate(len);
+            string = &string[..len];
         }
 
         let i = string.len();
-        let bytes = hex::decode(*string)?;
+        let bytes = hex::decode(string)?;
 
         stack.push(bytes)?;
         if partial {
@@ -318,8 +324,8 @@ impl StringUtils {
         let at = stack.pop_smallint_range(0, i32::MAX as _)? as usize;
         let mut head = stack.pop_bytes()?;
         anyhow::ensure!(at <= head.len(), "Index out of range");
-        let tail = Box::new(head[at..].to_owned());
-        head.truncate(at);
+        let tail = Rc::new(head[at..].to_owned());
+        Rc::make_mut(&mut head).truncate(at);
 
         stack.push_raw(head)?;
         stack.push_raw(tail)
@@ -329,7 +335,7 @@ impl StringUtils {
     fn interpret_bytes_concat(stack: &mut Stack) -> Result<()> {
         let tail = stack.pop_bytes()?;
         let mut head = stack.pop_bytes()?;
-        head.extend_from_slice(&tail);
+        Rc::make_mut(&mut head).extend_from_slice(&tail);
         stack.push_raw(head)
     }
 
@@ -354,7 +360,7 @@ impl StringUtils {
     #[cmd(name = "BhashB", stack, args(as_uint = false))]
     fn interpret_bytes_hash(stack: &mut Stack, as_uint: bool) -> Result<()> {
         let bytes = stack.pop_bytes()?;
-        let hash = sha2::Sha256::digest(*bytes);
+        let hash = sha2::Sha256::digest(&*bytes);
         if as_uint {
             stack.push(BigInt::from_bytes_be(Sign::Plus, &hash))
         } else {
@@ -365,13 +371,13 @@ impl StringUtils {
     #[cmd(name = "B>base64", stack)]
     fn interpret_bytes_to_base64(stack: &mut Stack) -> Result<()> {
         let bytes = stack.pop_bytes()?;
-        stack.push(encode_base64(*bytes))
+        stack.push(encode_base64(&*bytes))
     }
 
     #[cmd(name = "base64>B", stack)]
     fn interpret_base64_to_bytes(stack: &mut Stack) -> Result<()> {
         let string = stack.pop_string()?;
-        let bytes = decode_base64(*string)?;
+        let bytes = decode_base64(&*string)?;
         stack.push(bytes)
     }
 }

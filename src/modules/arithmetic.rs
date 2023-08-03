@@ -36,7 +36,7 @@ impl Arithmetic {
     fn interpret_plus(stack: &mut Stack) -> Result<()> {
         let y = stack.pop_int()?;
         let mut x = stack.pop_int()?;
-        *x += *y;
+        *Rc::make_mut(&mut x) += y.as_ref();
         stack.push_raw(x)
     }
 
@@ -44,7 +44,7 @@ impl Arithmetic {
     fn interpret_minus(stack: &mut Stack) -> Result<()> {
         let y = stack.pop_int()?;
         let mut x = stack.pop_int()?;
-        *x -= *y;
+        *Rc::make_mut(&mut x) -= y.as_ref();
         stack.push_raw(x)
     }
 
@@ -54,14 +54,17 @@ impl Arithmetic {
     #[cmd(name = "2-", stack, args(rhs = -2))]
     fn interpret_plus_const(stack: &mut Stack, rhs: i32) -> Result<()> {
         let mut x = stack.pop_int()?;
-        *x += rhs;
+        *Rc::make_mut(&mut x) += rhs;
         stack.push_raw(x)
     }
 
     #[cmd(name = "negate", stack)]
     fn interpret_negate(stack: &mut Stack) -> Result<()> {
         let mut x = stack.pop_int()?;
-        *x = -std::mem::take(&mut x);
+        {
+            let x = Rc::make_mut(&mut x);
+            *x = -std::mem::take(x);
+        }
         stack.push_raw(x)
     }
 
@@ -69,7 +72,7 @@ impl Arithmetic {
     fn interpret_mul(stack: &mut Stack) -> Result<()> {
         let y = stack.pop_int()?;
         let mut x = stack.pop_int()?;
-        *x *= *y;
+        *Rc::make_mut(&mut x) *= y.as_ref();
         stack.push_raw(x)
     }
 
@@ -125,7 +128,7 @@ impl Arithmetic {
         let mut mask = BigInt::one();
         mask <<= y;
         mask -= 1;
-        *x &= mask;
+        *Rc::make_mut(&mut x) &= mask;
         stack.push_raw(x)
     }
 
@@ -133,7 +136,7 @@ impl Arithmetic {
     fn interpret_lshift(stack: &mut Stack) -> Result<()> {
         let y = stack.pop_smallint_range(0, 256)? as u16;
         let mut x = stack.pop_int()?;
-        *x <<= y;
+        *Rc::make_mut(&mut x) <<= y;
         stack.push_raw(x)
     }
 
@@ -144,7 +147,7 @@ impl Arithmetic {
         let y = stack.pop_smallint_range(0, 256)? as u16;
         let mut x = stack.pop_int()?;
         match r {
-            Rounding::Floor => *x >>= y,
+            Rounding::Floor => *Rc::make_mut(&mut x) >>= y,
             // TODO
             Rounding::Nearest => unimplemented!(),
             Rounding::Ceil => unimplemented!(),
@@ -155,14 +158,14 @@ impl Arithmetic {
     #[cmd(name = "2*", stack, args(y = 1))]
     fn interpret_lshift_const(stack: &mut Stack, y: u8) -> Result<()> {
         let mut x = stack.pop_int()?;
-        *x <<= y;
+        *Rc::make_mut(&mut x) <<= y;
         stack.push_raw(x)
     }
 
     #[cmd(name = "2/", stack, args(y = 1))]
     fn interpret_rshift_const(stack: &mut Stack, y: u8) -> Result<()> {
         let mut x = stack.pop_int()?;
-        *x >>= y;
+        *Rc::make_mut(&mut x) >>= y;
         stack.push_raw(x)
     }
 
@@ -172,33 +175,36 @@ impl Arithmetic {
 
     #[cmd(name = "not", stack)]
     fn interpret_not(stack: &mut Stack) -> Result<()> {
-        let mut lhs = stack.pop_int()?;
-        *lhs = !std::mem::take(&mut lhs);
-        stack.push_raw(lhs)
+        let mut x = stack.pop_int()?;
+        {
+            let lhs = Rc::make_mut(&mut x);
+            *lhs = !std::mem::take(lhs);
+        }
+        stack.push_raw(x)
     }
 
     #[cmd(name = "and", stack)]
     fn interpret_and(stack: &mut Stack) -> Result<()> {
-        let mut lhs = stack.pop_int()?;
-        let rhs = stack.pop_int()?;
-        *lhs &= *rhs;
-        stack.push_raw(lhs)
+        let y = stack.pop_int()?;
+        let mut x = stack.pop_int()?;
+        *Rc::make_mut(&mut x) &= y.as_ref();
+        stack.push_raw(x)
     }
 
     #[cmd(name = "or", stack)]
     fn interpret_or(stack: &mut Stack) -> Result<()> {
-        let mut lhs = stack.pop_int()?;
-        let rhs = stack.pop_int()?;
-        *lhs |= *rhs;
-        stack.push_raw(lhs)
+        let y = stack.pop_int()?;
+        let mut x = stack.pop_int()?;
+        *Rc::make_mut(&mut x) |= y.as_ref();
+        stack.push_raw(x)
     }
 
     #[cmd(name = "xor", stack)]
     fn interpret_xor(stack: &mut Stack) -> Result<()> {
-        let mut lhs = stack.pop_int()?;
-        let rhs = stack.pop_int()?;
-        *lhs ^= *rhs;
-        stack.push_raw(lhs)
+        let y = stack.pop_int()?;
+        let mut x = stack.pop_int()?;
+        *Rc::make_mut(&mut x) ^= y.as_ref();
+        stack.push_raw(x)
     }
 
     // === Integer comparison ===

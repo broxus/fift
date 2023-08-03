@@ -266,10 +266,12 @@ pub fn decode_binary_bitstring(s: &str) -> Result<CellBuilder> {
 
 pub fn store_int_to_builder(
     builder: &mut CellBuilder,
-    int: &mut BigInt,
+    int: &BigInt,
     bits: u16,
     signed: bool,
 ) -> Result<()> {
+    use std::borrow::Cow;
+
     anyhow::ensure!(
         int.bits() <= bits as u64,
         "Integer does not fit into cell: {} bits out of {bits}",
@@ -279,10 +281,12 @@ pub fn store_int_to_builder(
     match int.to_u64() {
         Some(value) => builder.store_uint(value, bits)?,
         None => {
-            if bits % 8 != 0 {
+            let int = if bits % 8 != 0 {
                 let align = 8 - bits % 8;
-                *int <<= align;
-            }
+                Cow::Owned(int.clone() << align)
+            } else {
+                Cow::Borrowed(int)
+            };
 
             let minimal_bytes = ((bits + 7) / 8) as usize;
 
