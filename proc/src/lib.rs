@@ -25,18 +25,20 @@ struct FiftCmdArgs {
 
 #[proc_macro_attribute]
 pub fn fift_module(_: TokenStream, input: TokenStream) -> TokenStream {
-    let input = syn::parse_macro_input!(input as ItemImpl);
+    let mut input = syn::parse_macro_input!(input as ItemImpl);
 
     let dict_arg = quote::format_ident!("__dict");
 
-    let mut functions = Vec::new();
     let mut definitions = Vec::new();
     let mut errors = Vec::new();
 
+    let mut init_function_names = Vec::new();
     let mut init_functions = Vec::new();
+    let mut other_functions = Vec::new();
 
-    for impl_item in input.items {
+    for impl_item in input.items.drain(..) {
         let syn::ImplItem::Fn(mut fun) = impl_item else {
+            other_functions.push(impl_item);
             continue;
         };
 
@@ -61,7 +63,8 @@ pub fn fift_module(_: TokenStream, input: TokenStream) -> TokenStream {
 
         if has_init {
             fun.sig.ident = quote::format_ident!("__{}", fun.sig.ident);
-            init_functions.push(fun.sig.ident.clone());
+            init_function_names.push(fun.sig.ident.clone());
+            init_functions.push(fun);
         } else {
             for attr in cmd_attrs {
                 match process_cmd_definition(&fun, &dict_arg, attr) {
@@ -69,9 +72,9 @@ pub fn fift_module(_: TokenStream, input: TokenStream) -> TokenStream {
                     Err(e) => errors.push(e),
                 }
             }
-        }
 
-        functions.push(fun);
+            other_functions.push(syn::ImplItem::Fn(fun));
+        }
     }
 
     if !errors.is_empty() {
@@ -82,19 +85,23 @@ pub fn fift_module(_: TokenStream, input: TokenStream) -> TokenStream {
     let (impl_generics, ty_generics, where_clause) = input.generics.split_for_impl();
 
     quote! {
+        impl #impl_generics #ty #ty_generics #where_clause {
+            #(#init_functions)*
+        }
+
         #[automatically_derived]
         impl #impl_generics ::fift::core::Module for #ty #ty_generics #where_clause {
             fn init(
                 &self,
                 #dict_arg: &mut ::fift::core::Dictionary,
             ) -> ::core::result::Result<(), ::fift::error::Error> {
-                #(#init_functions(#dict_arg)?;)*
+                #(self.#init_function_names(#dict_arg)?;)*
                 #(#definitions?;)*
                 Ok(())
             }
         }
 
-        #(#functions)*
+        #(#other_functions)*
     }
     .into()
 }

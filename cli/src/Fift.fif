@@ -136,11 +136,7 @@ variable base
 { true (atom) drop } : atom
 { bl word atom 1 'nop } ::_ `
 { hole dup 1 { @ execute } does create } : recursive
-
-/* UNIMPLEMENTED
 { 0 { 1+ dup 1 ' $() does over (.) "$" swap $+ 0 (create) } rot times drop } : :$1..n
-*/
-
 { 10 hold } : +cr
 { 9 hold } : +tab
 { "" swap { 0 word 2dup $cmp } { rot swap $+ +cr swap } while 2drop } : scan-until-word

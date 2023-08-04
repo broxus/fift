@@ -104,11 +104,14 @@ impl ContImpl for InterpreterCont {
                         return Ok(None);
                     };
 
+                    let mut prefix_entry = None;
+
                     // Find the largest subtoken first
                     for subtoken in token.subtokens() {
                         if let Some(entry) = ctx.dictionary.lookup(subtoken) {
                             rewind = token.delta(subtoken);
-                            break 'entry entry;
+                            prefix_entry = Some(entry);
+                            break;
                         }
                     }
 
@@ -120,6 +123,9 @@ impl ContImpl for InterpreterCont {
                         word.push(' ');
                         ctx.dictionary.lookup(&word)
                     }) {
+                        rewind = 0;
+                        break 'entry entry;
+                    } else if let Some(entry) = prefix_entry {
                         break 'entry entry;
                     }
 
@@ -515,8 +521,11 @@ impl ContImpl for WhileCont {
 
 pub struct IntLitCont(BigInt);
 
-impl From<i32> for IntLitCont {
-    fn from(value: i32) -> Self {
+impl<T> From<T> for IntLitCont
+where
+    BigInt: From<T>,
+{
+    fn from(value: T) -> Self {
         Self(BigInt::from(value))
     }
 }

@@ -466,7 +466,7 @@ impl dyn StackValue + '_ {
         self.ty() == StackValueType::Null
     }
 
-    fn as_pair(&self) -> Option<(&dyn StackValue, &dyn StackValue)> {
+    pub fn as_pair(&self) -> Option<(&dyn StackValue, &dyn StackValue)> {
         let tuple = self.as_tuple().ok()?;
         match tuple.as_slice() {
             [first, second] => Some((first.as_ref(), second.as_ref())),
@@ -474,7 +474,7 @@ impl dyn StackValue + '_ {
         }
     }
 
-    fn as_list(&self) -> Option<(&dyn StackValue, &dyn StackValue)> {
+    pub fn as_list(&self) -> Option<(&dyn StackValue, &dyn StackValue)> {
         let (head, tail) = self.as_pair()?;
 
         let mut next = tail;

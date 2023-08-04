@@ -10,14 +10,13 @@ pub struct Control;
 #[fift_module]
 impl Control {
     #[init]
-    fn init(d: &mut Dictionary) -> Result<()> {
+    fn init(&self, d: &mut Dictionary) -> Result<()> {
         d.define_word(
             "'exit-interpret ",
             DictionaryEntry {
                 definition: Rc::new(ExitInterpretCont),
                 active: false,
             },
-            false,
         )
     }
 
@@ -27,6 +26,17 @@ impl Control {
     fn interpret_execute(ctx: &mut Context) -> Result<Option<Cont>> {
         let cont = ctx.stack.pop_cont()?;
         Ok(Some(cont.as_ref().clone()))
+    }
+
+    #[cmd(name = "call/cc", tail)]
+    fn interpret_call_cc(ctx: &mut Context) -> Result<Option<Cont>> {
+        let next = ctx.stack.pop_cont()?;
+        if let Some(next) = ctx.next.take() {
+            ctx.stack.push(next)?;
+        } else {
+            ctx.stack.push(())?;
+        }
+        Ok(Some(next.as_ref().clone()))
     }
 
     #[cmd(name = "times", tail)]
@@ -357,7 +367,7 @@ fn define_word(d: &mut Dictionary, mut word: String, cont: Cont, mode: DefMode) 
     if !mode.prefix {
         word.push(' ');
     }
-    d.define_word(
+    d.define_word_ext(
         word,
         DictionaryEntry {
             definition: cont,

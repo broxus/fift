@@ -190,6 +190,49 @@ impl CellUtils {
         stack.push(OwnedCellSlice::new(item.as_ref().clone()))
     }
 
+    #[cmd(name = "s@", stack, args(refs = false, adv = false, quiet = false))]
+    #[cmd(name = "sr@", stack, args(refs = true, adv = false, quiet = false))]
+    #[cmd(name = "s@+", stack, args(refs = false, adv = true, quiet = false))]
+    #[cmd(name = "sr@+", stack, args(refs = true, adv = true, quiet = false))]
+    #[cmd(name = "s@?", stack, args(refs = false, adv = false, quiet = true))]
+    #[cmd(name = "sr@?", stack, args(refs = true, adv = false, quiet = true))]
+    #[cmd(name = "s@?+", stack, args(refs = false, adv = true, quiet = true))]
+    #[cmd(name = "sr@?+", stack, args(refs = true, adv = true, quiet = true))]
+    fn interpret_load_slice(stack: &mut Stack, refs: bool, adv: bool, quiet: bool) -> Result<()> {
+        let refs = if refs {
+            stack.pop_smallint_range(0, MAX_REF_COUNT as u32)? as u8
+        } else {
+            0
+        };
+        let bits = stack.pop_smallint_range(0, MAX_BIT_LEN as u32)? as u16;
+        let mut cs_raw = stack.pop_slice()?;
+
+        let mut range = cs_raw.range();
+        if !range.try_advance(bits, refs) {
+            if !quiet {
+                anyhow::bail!(everscale_types::error::Error::CellUnderflow);
+            }
+            if adv {
+                stack.push_raw(cs_raw)?;
+            }
+            return stack.push_bool(false);
+        }
+
+        let mut sub_cs = cs_raw.as_ref().clone();
+        sub_cs.set_range(sub_cs.range().get_prefix(bits, refs));
+        stack.push(sub_cs)?;
+
+        if adv {
+            Rc::make_mut(&mut cs_raw).set_range(range);
+            stack.push_raw(cs_raw)?;
+        }
+
+        if quiet {
+            stack.push_bool(true)?;
+        }
+        Ok(())
+    }
+
     #[cmd(name = "i@", stack, args(sgn = true, advance = false, quiet = false))]
     #[cmd(name = "u@", stack, args(sgn = false, advance = false, quiet = false))]
     #[cmd(name = "i@+", stack, args(sgn = true, advance = true, quiet = false))]

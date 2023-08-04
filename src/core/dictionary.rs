@@ -10,18 +10,20 @@ pub struct DictionaryEntry {
     pub active: bool,
 }
 
-impl DictionaryEntry {
-    pub fn new_ordinary(definition: Cont) -> Self {
+impl From<Cont> for DictionaryEntry {
+    fn from(value: Cont) -> Self {
         Self {
-            definition,
+            definition: value,
             active: false,
         }
     }
+}
 
-    pub fn new_active(definition: Cont) -> Self {
+impl<T: ContImpl + 'static> From<Rc<T>> for DictionaryEntry {
+    fn from(value: Rc<T>) -> Self {
         Self {
-            definition,
-            active: true,
+            definition: value,
+            active: false,
         }
     }
 }
@@ -95,7 +97,6 @@ impl Dictionary {
                 definition: Rc::new(f),
                 active: false,
             },
-            false,
         )
     }
 
@@ -110,7 +111,6 @@ impl Dictionary {
                 definition: Rc::new(f),
                 active: false,
             },
-            false,
         )
     }
 
@@ -125,7 +125,6 @@ impl Dictionary {
                 definition: Rc::new(f),
                 active: true,
             },
-            false,
         )
     }
 
@@ -136,16 +135,22 @@ impl Dictionary {
                 definition: Rc::new(f),
                 active: false,
             },
-            false,
         )
     }
 
-    pub fn define_word<T: Into<String>>(
-        &mut self,
-        name: T,
-        word: DictionaryEntry,
-        allow_redefine: bool,
-    ) -> Result<()> {
+    pub fn define_word<T, E>(&mut self, name: T, word: E) -> Result<()>
+    where
+        T: Into<String>,
+        E: Into<DictionaryEntry>,
+    {
+        self.define_word_ext(name, word, false)
+    }
+
+    pub fn define_word_ext<T, E>(&mut self, name: T, word: E, allow_redefine: bool) -> Result<()>
+    where
+        T: Into<String>,
+        E: Into<DictionaryEntry>,
+    {
         fn define_word_impl(
             words: &mut WordsMap,
             name: String,
@@ -164,7 +169,7 @@ impl Dictionary {
                 _ => anyhow::bail!("Word `{name}` unexpectedly redefined"),
             }
         }
-        define_word_impl(&mut self.words, name.into(), word, allow_redefine)
+        define_word_impl(&mut self.words, name.into(), word.into(), allow_redefine)
     }
 
     pub fn undefine_word(&mut self, name: &str) -> bool {

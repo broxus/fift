@@ -12,14 +12,9 @@ pub struct Arithmetic;
 #[fift_module]
 impl Arithmetic {
     #[init]
-    fn init(d: &mut Dictionary) -> Result<()> {
-        let mut make_int_lit = |name: &str, value: i32| {
-            d.define_word(
-                name,
-                DictionaryEntry::new_ordinary(Rc::new(cont::IntLitCont::from(value))),
-                false,
-            )
-        };
+    fn init(&self, d: &mut Dictionary) -> Result<()> {
+        let mut make_int_lit =
+            |name: &str, value: i32| d.define_word(name, Rc::new(cont::IntLitCont::from(value)));
 
         make_int_lit("false ", 0)?;
         make_int_lit("true ", -1)?;

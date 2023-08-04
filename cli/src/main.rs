@@ -8,10 +8,12 @@ use console::style;
 use fift::core::lexer::LexerPosition;
 use fift::core::{Environment, SourceBlock};
 
+use self::args::CmdArgsUtils;
 use self::env::SystemEnvironment;
 use self::input::LineReader;
-use self::util::ArgsOrVersion;
+use self::util::{ArgsOrVersion, RestArgs, RestArgsDelimiter};
 
+mod args;
 mod env;
 mod input;
 mod util;
@@ -43,8 +45,17 @@ struct App {
     source_files: Vec<String>,
 }
 
+#[derive(Default)]
+struct ScriptModeDelim;
+
+impl RestArgsDelimiter for ScriptModeDelim {
+    const DELIM: &'static str = "-s";
+    const DESCR: &'static str = r"script mode: use first argument as a fift source file and
+                    import remaining arguments as $n";
+}
+
 fn main() -> Result<ExitCode> {
-    let ArgsOrVersion::<App>(app) = argh::from_env();
+    let RestArgs(ArgsOrVersion::<App>(app), rest, ScriptModeDelim) = argh::from_env();
 
     // Prepare system environment
     let mut env = SystemEnvironment::with_include_dirs(
@@ -67,6 +78,10 @@ fn main() -> Result<ExitCode> {
         source_blocks.push(SourceBlock::new("<stdin>", std::io::stdin().lock()));
     }
 
+    if let Some(path) = rest.first() {
+        source_blocks.push(env.include(&path)?);
+    }
+
     for path in app.source_files.into_iter().rev() {
         source_blocks.push(env.include(&path)?);
     }
@@ -82,7 +97,10 @@ fn main() -> Result<ExitCode> {
     }
 
     // Prepare Fift context
-    let mut ctx = fift::Context::new(&mut env, &mut stdout).with_basic_modules()?;
+    let mut ctx = fift::Context::new(&mut env, &mut stdout)
+        .with_basic_modules()?
+        .with_module(CmdArgsUtils::new(rest))?;
+
     for source_block in source_blocks {
         ctx.add_source_block(source_block);
     }
