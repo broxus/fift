@@ -301,7 +301,7 @@ checksum = "e825f6987101665dea6ec934c09ec6d721de7bc1bf92248e1d5810c8cd636b77"
 
 [[package]]
 name = "fift"
-version = "0.1.5"
+version = "0.1.7"
 dependencies = [
  "ahash",
  "anyhow",
@@ -323,7 +323,7 @@ dependencies = [
 
 [[package]]
 name = "fift-cli"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "anyhow",
  "argh",
@@ -334,7 +334,7 @@ dependencies = [
 
 [[package]]
 name = "fift-proc"
-version = "0.1.0"
+version = "0.1.7"
 dependencies = [
  "darling",
  "quote",
