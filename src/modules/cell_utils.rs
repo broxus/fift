@@ -6,7 +6,6 @@ use everscale_types::cell::{MAX_BIT_LEN, MAX_REF_COUNT};
 use everscale_types::prelude::*;
 use num_bigint::{BigInt, Sign};
 use num_traits::Zero;
-use sha2::Digest;
 
 use crate::core::*;
 use crate::util::*;
@@ -173,12 +172,12 @@ impl CellUtils {
     #[cmd(name = "hashu", stack, args(as_uint = true))]
     #[cmd(name = "hashB", stack, args(as_uint = false))]
     fn interpret_cell_hash(stack: &mut Stack, as_uint: bool) -> Result<()> {
-        let bytes = stack.pop_bytes()?;
-        let hash = sha2::Sha256::digest(&*bytes);
+        let cell = stack.pop_cell()?;
+        let hash = cell.repr_hash();
         if as_uint {
-            stack.push(BigInt::from_bytes_be(Sign::Plus, &hash))
+            stack.push(BigInt::from_bytes_be(Sign::Plus, hash.as_slice()))
         } else {
-            stack.push(hash.to_vec())
+            stack.push(hash.as_slice().to_vec())
         }
     }
 
