@@ -69,6 +69,10 @@ impl Dictionary {
         std::ptr::eq(left, right)
     }
 
+    pub fn words(&self) -> impl Iterator<Item = &String> {
+        self.words.keys()
+    }
+
     pub fn lookup(&self, name: &str) -> Option<&DictionaryEntry> {
         self.words.get(name)
     }

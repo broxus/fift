@@ -356,6 +356,19 @@ impl StringUtils {
 
     // TODO: bytes <=> int
 
+    #[cmd(name = "$>B", stack)]
+    fn interpret_string_to_bytes(stack: &mut Stack) -> Result<()> {
+        let string = stack.pop_string()?;
+        stack.push(string.as_ref().as_bytes().to_vec())
+    }
+
+    #[cmd(name = "B>$", stack)]
+    fn interpret_bytes_to_string(stack: &mut Stack) -> Result<()> {
+        let bytes = stack.pop_bytes_owned()?;
+        let string = String::from_utf8(bytes)?;
+        stack.push(string)
+    }
+
     #[cmd(name = "Bhash", stack, args(as_uint = true))]
     #[cmd(name = "Bhashu", stack, args(as_uint = true))]
     #[cmd(name = "BhashB", stack, args(as_uint = false))]

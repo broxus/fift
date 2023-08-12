@@ -144,6 +144,18 @@ impl DebugUtils {
         let string = format!("{:b}", int.as_ref());
         stack.push(string)
     }
+
+    #[cmd(name = "words")]
+    fn interpret_words(ctx: &mut Context) -> Result<()> {
+        let mut all_words = ctx.dictionary.words().collect::<Vec<_>>();
+        all_words.sort();
+        let mut first = true;
+        for word in all_words {
+            let space = if std::mem::take(&mut first) { "" } else { " " };
+            write!(ctx.stdout, "{space}{word}")?;
+        }
+        Ok(())
+    }
 }
 
 const fn opt_space(space_after: bool) -> &'static str {

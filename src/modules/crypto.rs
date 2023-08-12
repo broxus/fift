@@ -39,6 +39,27 @@ impl Crypto {
         stack.push_bool(public.verify_raw(&data, &signature))
     }
 
+    #[cmd(name = "ed25519_sign_uint", stack)]
+    fn interpret_ed25519_sign_uint(stack: &mut Stack) -> Result<()> {
+        let secret = pop_secret_key(stack)?;
+        let public = ed25519::PublicKey::from(&secret);
+        let int = stack.pop_int()?;
+        anyhow::ensure!(
+            int.sign() != num_bigint::Sign::Minus,
+            "Expected a positive number"
+        );
+        anyhow::ensure!(
+            int.bits() <= 256,
+            "Ed25519 data to be signed must fit into 256 bits"
+        );
+        let (_, mut data) = int.to_bytes_le();
+        data.resize(32, 0);
+        data.reverse();
+
+        let signature = secret.expand().sign_raw(&data, &public);
+        stack.push(signature.to_vec())
+    }
+
     #[cmd(name = "crc16", stack)]
     fn interpret_crc16(stack: &mut Stack) -> Result<()> {
         let bytes = stack.pop_bytes()?;

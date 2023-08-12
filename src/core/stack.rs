@@ -161,6 +161,13 @@ impl Stack {
         self.pop()?.into_bytes()
     }
 
+    pub fn pop_bytes_owned(&mut self) -> Result<Vec<u8>> {
+        Ok(match Rc::try_unwrap(self.pop()?.into_bytes()?) {
+            Ok(inner) => inner,
+            Err(rc) => rc.as_ref().clone(),
+        })
+    }
+
     pub fn pop_cell(&mut self) -> Result<Rc<Cell>> {
         self.pop()?.into_cell()
     }
