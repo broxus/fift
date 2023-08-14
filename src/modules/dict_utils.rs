@@ -1,10 +1,13 @@
+use std::iter::Peekable;
 use std::rc::Rc;
 
 use anyhow::Result;
 use everscale_types::cell::DefaultFinalizer;
-use everscale_types::dict::*;
+use everscale_types::dict::{self, dict_get, dict_insert, dict_remove_owned, SetMode};
 use everscale_types::prelude::*;
+use num_bigint::BigInt;
 
+use crate::core::cont::{LoopCont, LoopContImpl};
 use crate::core::*;
 use crate::util::*;
 
@@ -88,8 +91,9 @@ impl DictUtils {
             &mut Cell::default_finalizer(),
         );
 
+        // TODO: use operation result flag?
         let res = dict.is_ok();
-        if let Ok(cell) = dict {
+        if let Ok((cell, _)) = dict {
             push_maybe_cell(stack, cell)?;
         }
         stack.push_bool(res)
@@ -153,6 +157,84 @@ impl DictUtils {
         }
         stack.push_bool(found)
     }
+
+    #[cmd(name = "dictforeach", tail, args(r = false, s = false))]
+    #[cmd(name = "idictforeach", tail, args(r = false, s = true))]
+    #[cmd(name = "dictforeachrev", tail, args(r = true, s = false))]
+    #[cmd(name = "idictforeachrev", tail, args(r = true, s = true))]
+    fn interpret_dict_foreach(ctx: &mut Context, r: bool, s: bool) -> Result<Option<Cont>> {
+        let func = ctx.stack.pop_cont()?.as_ref().clone();
+        let bits = ctx.stack.pop_smallint_range(0, MAX_KEY_BITS)? as u16;
+        let cell = pop_maybe_cell(&mut ctx.stack)?;
+        Ok(Some(Rc::new(LoopCont::new(
+            DictIterCont {
+                iter: OwnedDictIter::new(cell, bits, r, s).peekable(),
+                signed: s,
+                ok: true,
+            },
+            func,
+            ctx.next.take(),
+        ))))
+    }
+}
+
+#[derive(Clone)]
+struct DictIterCont {
+    iter: Peekable<OwnedDictIter>,
+    signed: bool,
+    ok: bool,
+}
+
+impl LoopContImpl for DictIterCont {
+    fn pre_exec(&mut self, ctx: &mut Context) -> Result<bool> {
+        let (key, value) = match self.iter.next() {
+            Some(entry) => entry?,
+            None => return Ok(false),
+        };
+
+        ctx.stack.push(builder_to_int(&key, self.signed)?)?;
+        ctx.stack.push(value)?;
+        Ok(true)
+    }
+
+    fn post_exec(&mut self, ctx: &mut Context) -> Result<bool> {
+        self.ok = ctx.stack.pop_bool()?;
+        Ok(self.ok && self.iter.peek().is_some())
+    }
+
+    fn finalize(&mut self, ctx: &mut Context) -> Result<bool> {
+        ctx.stack.push_bool(self.ok)?;
+        Ok(true)
+    }
+}
+
+#[derive(Clone)]
+struct OwnedDictIter {
+    root: Option<Cell>,
+    inner: dict::RawIter<'static>,
+}
+
+impl OwnedDictIter {
+    fn new(root: Option<Cell>, bit_len: u16, reversed: bool, signed: bool) -> Self {
+        let inner = dict::RawIter::new_ext(&root, bit_len, reversed, signed);
+
+        // SAFETY: iter lifetime is bounded to the `DynCell` which lives as long
+        // as `Cell` lives. By storing root we guarantee that it will live enough.
+        let inner = unsafe { std::mem::transmute::<_, dict::RawIter<'static>>(inner) };
+
+        Self { root, inner }
+    }
+}
+
+impl Iterator for OwnedDictIter {
+    type Item = Result<(CellBuilder, OwnedCellSlice), everscale_types::error::Error>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        Some(match self.inner.next_owned(&self.root)? {
+            Ok((key, value)) => Ok((key, OwnedCellSlice::from(value))),
+            Err(e) => Err(e),
+        })
+    }
 }
 
 enum KeyMode {
@@ -188,6 +270,23 @@ fn pop_dict_key(stack: &mut Stack, key_mode: KeyMode, bits: u16) -> Result<Owned
     let int = stack.pop_int()?;
     store_int_to_builder(&mut builder, &int, bits, signed)?;
     Ok(OwnedCellSlice::new(builder.build()?))
+}
+
+fn builder_to_int(builder: &CellBuilder, signed: bool) -> Result<BigInt> {
+    let bits = builder.bit_len();
+    anyhow::ensure!(
+        bits <= (256 + signed as u16),
+        "Key does not fit into integer"
+    );
+
+    let bytes = ((bits + 7) / 8) as usize;
+    let mut int = BigInt::from_signed_bytes_be(&builder.raw_data()[..bytes]);
+
+    let rem = bits % 8;
+    if rem != 0 {
+        int >>= 8 - rem;
+    }
+    Ok(int)
 }
 
 const MAX_KEY_BITS: u32 = 1023;

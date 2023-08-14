@@ -184,7 +184,7 @@ impl FiftModule for BaseModule {
         let mut first = true;
         for item in tuple {
             if let Some(sep) = sep.as_deref() {
-                if !std::mem::replace(&mut first, false) {
+                if !std::mem::take(&mut first) {
                     result.push_str(sep);
                 }
             }
