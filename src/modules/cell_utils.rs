@@ -256,7 +256,7 @@ impl CellUtils {
                 BigInt::from(int as i64)
             }),
             _ => {
-                let align = 8 - bits % 8;
+                let rem = bits % 8;
                 let mut buffer = [0u8; 33];
                 cs.load_raw(&mut buffer, bits).map(|buffer| {
                     let mut int = if sgn {
@@ -264,7 +264,9 @@ impl CellUtils {
                     } else {
                         BigInt::from_bytes_be(Sign::Plus, buffer)
                     };
-                    int >>= align;
+                    if bits % 8 != 0 {
+                        int >>= 8 - rem;
+                    }
                     int
                 })
             }

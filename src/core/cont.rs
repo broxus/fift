@@ -519,6 +519,105 @@ impl ContImpl for WhileCont {
     }
 }
 
+pub struct LoopCont<T> {
+    inner: T,
+    state: LoopContState,
+    func: Cont,
+    after: Option<Cont>,
+}
+
+impl<T> LoopCont<T> {
+    pub fn new(inner: T, func: Cont, after: Option<Cont>) -> Self {
+        Self {
+            inner,
+            state: LoopContState::Init,
+            func,
+            after,
+        }
+    }
+}
+
+impl<T: LoopContImpl + 'static> ContImpl for LoopCont<T> {
+    fn run(mut self: Rc<Self>, ctx: &mut Context) -> Result<Option<Cont>> {
+        let Some(this) = Rc::get_mut(&mut self) else {
+            return Ok(Some(Rc::new(Self {
+                inner: self.inner.clone(),
+                state: self.state,
+                func: self.func.clone(),
+                after: self.after.clone(),
+            })));
+        };
+
+        ctx.insert_before_next(&mut this.after);
+        Ok(loop {
+            match this.state {
+                LoopContState::Init => {
+                    if !this.inner.init(ctx)? {
+                        break this.after.take();
+                    }
+                    this.state = LoopContState::PreExec;
+                }
+                LoopContState::PreExec => {
+                    if !this.inner.pre_exec(ctx)? {
+                        this.state = LoopContState::Finalize;
+                        continue;
+                    }
+                    this.state = LoopContState::PostExec;
+                    let res = self.func.clone();
+                    ctx.next = Some(self);
+                    break Some(res);
+                }
+                LoopContState::PostExec => {
+                    if !this.inner.post_exec(ctx)? {
+                        this.state = LoopContState::Finalize;
+                        continue;
+                    }
+                    this.state = LoopContState::PreExec;
+                    break Some(self);
+                }
+                LoopContState::Finalize => {
+                    break if this.inner.finalize(ctx)? {
+                        this.after.take()
+                    } else {
+                        None
+                    };
+                }
+            }
+        })
+    }
+
+    fn fmt_name(&self, _: &Dictionary, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "<generic loop continuation state {:?}>", self.state)
+    }
+}
+
+pub trait LoopContImpl: Clone {
+    fn init(&mut self, ctx: &mut Context) -> Result<bool> {
+        _ = ctx;
+        Ok(true)
+    }
+    fn pre_exec(&mut self, ctx: &mut Context) -> Result<bool> {
+        _ = ctx;
+        Ok(true)
+    }
+    fn post_exec(&mut self, ctx: &mut Context) -> Result<bool> {
+        _ = ctx;
+        Ok(true)
+    }
+    fn finalize(&mut self, ctx: &mut Context) -> Result<bool> {
+        _ = ctx;
+        Ok(true)
+    }
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+enum LoopContState {
+    Init,
+    PreExec,
+    PostExec,
+    Finalize,
+}
+
 pub struct IntLitCont(BigInt);
 
 impl<T> From<T> for IntLitCont
@@ -584,9 +683,7 @@ impl ContImpl for MultiLitCont {
     fn fmt_name(&self, d: &Dictionary, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let mut first = true;
         for item in &self.0 {
-            if first {
-                first = false;
-            } else {
+            if !std::mem::take(&mut first) {
                 f.write_str(" ")?;
             }
             write_lit_cont_name(item.as_ref(), d, f)?;

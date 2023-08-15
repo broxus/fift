@@ -229,9 +229,7 @@ impl Stack {
             fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
                 let mut first = true;
                 for item in &self.0.items {
-                    if first {
-                        first = false;
-                    } else {
+                    if !std::mem::take(&mut first) {
                         f.write_str(" ")?;
                     }
                     item.as_ref().fmt_dump(f)?;
@@ -250,9 +248,7 @@ impl Stack {
             fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
                 let mut first = true;
                 for item in &self.0.items {
-                    if first {
-                        first = false;
-                    } else {
+                    if !std::mem::take(&mut first) {
                         f.write_str(" ")?;
                     }
                     item.as_ref().fmt_list(f)?;
@@ -395,11 +391,14 @@ define_stack_value! {
                     return f.write_str("[]");
                 }
                 f.write_str("[")?;
+                let mut first = true;
                 for item in v {
-                    f.write_str(" ")?;
+                    if !std::mem::take(&mut first) {
+                        f.write_str(" ")?;
+                    }
                     StackValue::fmt_dump(item.as_ref(), f)?;
                 }
-                f.write_str(" ]")
+                f.write_str("]")
             },
             as_tuple(v): &StackTuple = Ok(v),
             into_tuple,
@@ -504,8 +503,12 @@ impl dyn StackValue + '_ {
                 return Ok(());
             }
 
-            f.write_str("[ ")?;
+            f.write_str("[")?;
+            let mut first = true;
             for item in tuple {
+                if !std::mem::take(&mut first) {
+                    f.write_str(" ")?;
+                }
                 item.as_ref().fmt_list(f)?;
             }
             f.write_str("]")?;
