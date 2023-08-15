@@ -83,7 +83,7 @@ impl DictUtils {
 
         let mut key = key.apply()?.get_prefix(bits, 0);
         let dict = dict_insert(
-            &cell,
+            cell.as_ref(),
             &mut key,
             bits,
             &value,
@@ -112,7 +112,7 @@ impl DictUtils {
         );
 
         let key = key.apply()?.get_prefix(bits, 0);
-        let value = dict_get(&cell, bits, key).ok().flatten();
+        let value = dict_get(cell.as_ref(), bits, key).ok().flatten();
 
         let res = value.is_some();
         if let Some(value) = value {
@@ -140,7 +140,14 @@ impl DictUtils {
         );
 
         let key = &mut key.apply()?.get_prefix(bits, 0);
-        let value = dict_remove_owned(&cell, key, bits, false, &mut Cell::default_finalizer()).ok();
+        let value = dict_remove_owned(
+            cell.as_ref(),
+            key,
+            bits,
+            false,
+            &mut Cell::default_finalizer(),
+        )
+        .ok();
 
         let (dict, value) = match value {
             Some((dict, value)) => (dict, value),
@@ -214,6 +221,23 @@ impl DictUtils {
             ctx.next.take(),
         ))))
     }
+
+    #[cmd(name = "dictdiff", tail)]
+    fn interpret_dict_diff(ctx: &mut Context) -> Result<Option<Cont>> {
+        let func = ctx.stack.pop_cont()?.as_ref().clone();
+        let bits = ctx.stack.pop_smallint_range(0, MAX_KEY_BITS)? as u16;
+        let right = pop_maybe_cell(&mut ctx.stack)?;
+        let left = pop_maybe_cell(&mut ctx.stack)?;
+        Ok(Some(Rc::new(LoopCont::new(
+            DictDiffCont {
+                left: OwnedDictIter::new(left, bits, false, false).peekable(),
+                right: OwnedDictIter::new(right, bits, false, false).peekable(),
+                ok: true,
+            },
+            func,
+            ctx.next.take(),
+        ))))
+    }
 }
 
 #[derive(Clone)]
@@ -249,7 +273,7 @@ impl LoopContImpl for DictMapCont {
 
             let value = ctx.stack.pop_builder()?;
             let (new_root, _) = dict_insert(
-                &self.result,
+                self.result.as_ref(),
                 &mut key.as_data_slice(),
                 key.bit_len(),
                 &value.as_full_slice(),
@@ -264,6 +288,67 @@ impl LoopContImpl for DictMapCont {
 
     fn finalize(&mut self, ctx: &mut Context) -> Result<bool> {
         push_maybe_cell(&mut ctx.stack, self.result.take())?;
+        Ok(true)
+    }
+}
+
+#[derive(Clone)]
+struct DictDiffCont {
+    left: Peekable<OwnedDictIter>,
+    right: Peekable<OwnedDictIter>,
+    ok: bool,
+}
+
+impl LoopContImpl for DictDiffCont {
+    fn pre_exec(&mut self, ctx: &mut Context) -> Result<bool> {
+        Ok(loop {
+            let left = self.left.peek().map(clone_error).transpose()?;
+            let right = self.right.peek().map(clone_error).transpose()?;
+            let (iter, swap) = match (left, right) {
+                (None, None) => break false,
+                (Some(_), None) => (&mut self.left, false),
+                (None, Some(_)) => (&mut self.right, true),
+                (Some((left_key, _)), Some((right_key, _))) => match left_key.cmp(right_key) {
+                    std::cmp::Ordering::Less => (&mut self.left, false),
+                    std::cmp::Ordering::Greater => (&mut self.right, true),
+                    std::cmp::Ordering::Equal => {
+                        let (key, left_value) = self.left.next().unwrap()?;
+                        let (_, right_value) = self.right.next().unwrap()?;
+
+                        if left_value.apply()?.cmp_by_content(&right_value.apply()?)?
+                            == std::cmp::Ordering::Equal
+                        {
+                            continue;
+                        }
+
+                        ctx.stack.push(builder_to_int(&key, false)?)?;
+                        ctx.stack.push(left_value)?;
+                        ctx.stack.push(right_value)?;
+                        break true;
+                    }
+                },
+            };
+
+            let (key, value) = iter.next().unwrap()?;
+            ctx.stack.push(builder_to_int(&key, false)?)?;
+            if !swap {
+                ctx.stack.push(value)?;
+                ctx.stack.push(())?;
+            } else {
+                ctx.stack.push(())?;
+                ctx.stack.push(value)?;
+            }
+            break true;
+        })
+    }
+
+    fn post_exec(&mut self, ctx: &mut Context) -> Result<bool> {
+        self.ok = ctx.stack.pop_bool()?;
+        Ok(self.ok)
+    }
+
+    fn finalize(&mut self, ctx: &mut Context) -> Result<bool> {
+        ctx.stack.push_bool(self.ok)?;
         Ok(true)
     }
 }
@@ -302,7 +387,7 @@ impl LoopContImpl for DictMergeCont {
             };
             let (key, value) = iter.next().unwrap()?;
             let (new_root, _) = dict_insert(
-                &self.result,
+                self.result.as_ref(),
                 &mut key.as_data_slice(),
                 key.bit_len(),
                 &value.apply()?,
@@ -331,7 +416,7 @@ impl LoopContImpl for DictMergeCont {
 
             let value = ctx.stack.pop_builder()?;
             let (new_root, _) = dict_insert(
-                &self.result,
+                self.result.as_ref(),
                 &mut key.as_data_slice(),
                 key.bit_len(),
                 &value.as_full_slice(),
@@ -406,6 +491,13 @@ impl Iterator for OwnedDictIter {
             Ok((key, value)) => Ok((key, OwnedCellSlice::from(value))),
             Err(e) => Err(e),
         })
+    }
+}
+
+fn clone_error(res: &<OwnedDictIter as Iterator>::Item) -> Result<&(CellBuilder, OwnedCellSlice)> {
+    match res {
+        Ok(value) => Ok(value),
+        Err(e) => Err(e.clone().into()),
     }
 }
 
