@@ -196,6 +196,24 @@ impl DictUtils {
             ctx.next.take(),
         ))))
     }
+
+    #[cmd(name = "dictmerge", tail)]
+    fn interpret_dict_merge(ctx: &mut Context) -> Result<Option<Cont>> {
+        let func = ctx.stack.pop_cont()?.as_ref().clone();
+        let bits = ctx.stack.pop_smallint_range(0, MAX_KEY_BITS)? as u16;
+        let right = pop_maybe_cell(&mut ctx.stack)?;
+        let left = pop_maybe_cell(&mut ctx.stack)?;
+        Ok(Some(Rc::new(LoopCont::new(
+            DictMergeCont {
+                left: OwnedDictIter::new(left, bits, false, false).peekable(),
+                right: OwnedDictIter::new(right, bits, false, false).peekable(),
+                pos: None,
+                result: None,
+            },
+            func,
+            ctx.next.take(),
+        ))))
+    }
 }
 
 #[derive(Clone)]
@@ -242,6 +260,88 @@ impl LoopContImpl for DictMapCont {
         }
 
         Ok(self.iter.peek().is_some())
+    }
+
+    fn finalize(&mut self, ctx: &mut Context) -> Result<bool> {
+        push_maybe_cell(&mut ctx.stack, self.result.take())?;
+        Ok(true)
+    }
+}
+
+#[derive(Clone)]
+struct DictMergeCont {
+    left: Peekable<OwnedDictIter>,
+    right: Peekable<OwnedDictIter>,
+    pos: Option<CellBuilder>,
+    result: Option<Cell>,
+}
+
+impl LoopContImpl for DictMergeCont {
+    fn pre_exec(&mut self, ctx: &mut Context) -> Result<bool> {
+        fn clone_error(
+            res: &<OwnedDictIter as Iterator>::Item,
+        ) -> Result<&(CellBuilder, OwnedCellSlice)> {
+            match res {
+                Ok(value) => Ok(value),
+                Err(e) => Err(e.clone().into()),
+            }
+        }
+
+        let (left_iter, right_iter) = loop {
+            let left = self.left.peek().map(clone_error).transpose()?;
+            let right = self.right.peek().map(clone_error).transpose()?;
+            let iter = match (left, right) {
+                (None, None) => return Ok(false),
+                (Some(_), None) => &mut self.left,
+                (None, Some(_)) => &mut self.right,
+                (Some((left_key, _)), Some((right_key, _))) => match left_key.cmp(right_key) {
+                    std::cmp::Ordering::Less => &mut self.left,
+                    std::cmp::Ordering::Equal => break (&mut self.left, &mut self.right),
+                    std::cmp::Ordering::Greater => &mut self.right,
+                },
+            };
+            let (key, value) = iter.next().unwrap()?;
+            let (new_root, _) = dict_insert(
+                &self.result,
+                &mut key.as_data_slice(),
+                key.bit_len(),
+                &value.apply()?,
+                SetMode::Set,
+                &mut Cell::default_finalizer(),
+            )?;
+            self.result = new_root;
+        };
+
+        let (key, left) = left_iter.next().unwrap()?;
+        let (_, right) = right_iter.next().unwrap()?;
+
+        ctx.stack.push(CellBuilder::new())?;
+        ctx.stack.push(left)?;
+        ctx.stack.push(right)?;
+        self.pos = Some(key);
+        Ok(true)
+    }
+
+    fn post_exec(&mut self, ctx: &mut Context) -> Result<bool> {
+        if ctx.stack.pop_bool()? {
+            let key = self
+                .pos
+                .as_ref()
+                .context("Uninitialized dictmerge iterator")?;
+
+            let value = ctx.stack.pop_builder()?;
+            let (new_root, _) = dict_insert(
+                &self.result,
+                &mut key.as_data_slice(),
+                key.bit_len(),
+                &value.as_full_slice(),
+                SetMode::Set,
+                &mut Cell::default_finalizer(),
+            )?;
+            self.result = new_root;
+        }
+
+        Ok(true)
     }
 
     fn finalize(&mut self, ctx: &mut Context) -> Result<bool> {
