@@ -1,7 +1,7 @@
 use std::iter::Peekable;
 use std::rc::Rc;
 
-use anyhow::Result;
+use anyhow::{Context as _, Result};
 use everscale_types::cell::DefaultFinalizer;
 use everscale_types::dict::{self, dict_get, dict_insert, dict_remove_owned, SetMode};
 use everscale_types::prelude::*;
@@ -158,6 +158,26 @@ impl DictUtils {
         stack.push_bool(found)
     }
 
+    #[cmd(name = "dictmap", tail, args(ext = false, s = false))]
+    #[cmd(name = "dictmapext", tail, args(ext = true, s = false))]
+    #[cmd(name = "idictmapext", tail, args(ext = true, s = true))]
+    fn interpret_dict_map(ctx: &mut Context, ext: bool, s: bool) -> Result<Option<Cont>> {
+        let func = ctx.stack.pop_cont()?.as_ref().clone();
+        let bits = ctx.stack.pop_smallint_range(0, MAX_KEY_BITS)? as u16;
+        let cell = pop_maybe_cell(&mut ctx.stack)?;
+        Ok(Some(Rc::new(LoopCont::new(
+            DictMapCont {
+                iter: OwnedDictIter::new(cell, bits, false, s).peekable(),
+                pos: None,
+                extended: ext,
+                signed: s,
+                result: None,
+            },
+            func,
+            ctx.next.take(),
+        ))))
+    }
+
     #[cmd(name = "dictforeach", tail, args(r = false, s = false))]
     #[cmd(name = "idictforeach", tail, args(r = false, s = true))]
     #[cmd(name = "dictforeachrev", tail, args(r = true, s = false))]
@@ -175,6 +195,58 @@ impl DictUtils {
             func,
             ctx.next.take(),
         ))))
+    }
+}
+
+#[derive(Clone)]
+struct DictMapCont {
+    iter: Peekable<OwnedDictIter>,
+    pos: Option<CellBuilder>,
+    result: Option<Cell>,
+    extended: bool,
+    signed: bool,
+}
+
+impl LoopContImpl for DictMapCont {
+    fn pre_exec(&mut self, ctx: &mut Context) -> Result<bool> {
+        let (key, value) = match self.iter.next() {
+            Some(entry) => entry?,
+            None => return Ok(false),
+        };
+        ctx.stack.push(CellBuilder::new())?;
+        if self.extended {
+            ctx.stack.push(builder_to_int(&key, self.signed)?)?;
+        }
+        ctx.stack.push(value)?;
+        self.pos = Some(key);
+        Ok(true)
+    }
+
+    fn post_exec(&mut self, ctx: &mut Context) -> Result<bool> {
+        if ctx.stack.pop_bool()? {
+            let key = self
+                .pos
+                .as_ref()
+                .context("Uninitialized dictmap iterator")?;
+
+            let value = ctx.stack.pop_builder()?;
+            let (new_root, _) = dict_insert(
+                &self.result,
+                &mut key.as_data_slice(),
+                key.bit_len(),
+                &value.as_full_slice(),
+                SetMode::Set,
+                &mut Cell::default_finalizer(),
+            )?;
+            self.result = new_root;
+        }
+
+        Ok(self.iter.peek().is_some())
+    }
+
+    fn finalize(&mut self, ctx: &mut Context) -> Result<bool> {
+        push_maybe_cell(&mut ctx.stack, self.result.take())?;
+        Ok(true)
     }
 }
 

@@ -33,3 +33,6 @@ unicode-segmentation = "1.0"
 everscale-types = "0.1.0-rc.2"
 
 fift-proc = { path = "./proc", version = "=0.1.7" }
+
+[patch.crates-io]
+everscale-types = { git = "https://github.com/broxus/everscale-types.git" }
