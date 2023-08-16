@@ -7,6 +7,7 @@ use dyn_clone::DynClone;
 use everscale_types::prelude::*;
 use num_bigint::BigInt;
 use num_traits::{One, ToPrimitive, Zero};
+use rand::Rng;
 
 use super::cont::*;
 use crate::util::DisplaySliceExt;
@@ -650,7 +651,7 @@ impl SharedBox {
     }
 }
 
-#[derive(Clone, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq, Hash)]
 pub enum Atom {
     Unnamed(i32),
     Named(Rc<str>),
@@ -705,6 +706,214 @@ impl Atoms {
     pub fn get<T: AsRef<str>>(&self, name: T) -> Option<Atom> {
         self.named.get(name.as_ref()).cloned()
     }
+}
+
+#[derive(Clone)]
+pub struct HashMapTreeNode {
+    key: Rc<dyn HashMapTreeKey>,
+    value: Rc<dyn StackValue>,
+    left: Option<Rc<HashMapTreeNode>>,
+    right: Option<Rc<HashMapTreeNode>>,
+    rand_offset: u64,
+}
+
+impl HashMapTreeNode {
+    pub fn new(key: Rc<dyn HashMapTreeKey>, value: Rc<dyn StackValue>) -> Self {
+        Self {
+            key,
+            value,
+            left: None,
+            right: None,
+            rand_offset: rand::thread_rng().gen(),
+        }
+    }
+
+    pub fn lookup<'a>(
+        self: &'a Rc<Self>,
+        key: &dyn HashMapTreeKey,
+    ) -> Option<&'a Rc<HashMapTreeNode>> {
+        let mut root = self;
+        loop {
+            root = match key.dyn_cmp(root.key.as_ref()) {
+                std::cmp::Ordering::Equal => return Some(root),
+                std::cmp::Ordering::Less => root.left.as_ref()?,
+                std::cmp::Ordering::Greater => root.right.as_ref()?,
+            };
+        }
+    }
+
+    pub fn set(self: Rc<Self>) {}
+
+    fn insert_internal(
+        root: Option<Rc<Self>>,
+        key: &Rc<dyn HashMapTreeKey>,
+        value: &Rc<dyn StackValue>,
+        rand_offset: u64,
+    ) -> Rc<Self> {
+        let Some(mut root) = root else {
+            return Rc::new(Self {
+                key: key.clone(),
+                value: value.clone(),
+                left: None,
+                right: None,
+                rand_offset,
+            });
+        };
+
+        if root.rand_offset <= rand_offset {
+            let (left, right) = root.split_internal(key);
+            Rc::new(Self {
+                key: key.clone(),
+                value: value.clone(),
+                left,
+                right,
+                rand_offset,
+            })
+        } else {
+            let this = Rc::make_mut(&mut root);
+            let branch = if key.dyn_cmp(this.key.as_ref()) == std::cmp::Ordering::Less {
+                &mut this.left
+            } else {
+                &mut this.right
+            };
+            *branch = Some(Self::insert_internal(
+                branch.take(),
+                key,
+                value,
+                rand_offset,
+            ));
+            root
+        }
+    }
+
+    fn replace_internal(
+        mut self: Rc<Self>,
+        key: &Rc<dyn HashMapTreeKey>,
+        value: &Rc<dyn StackValue>,
+    ) -> Option<Rc<Self>> {
+        match key.dyn_cmp(self.key.as_ref()) {
+            std::cmp::Ordering::Equal => {
+                let this = Rc::make_mut(&mut self);
+                this.value = value.clone();
+            }
+            std::cmp::Ordering::Less => {
+                let left = match Rc::get_mut(&mut self) {
+                    Some(this) => this.left.take()?,
+                    None => self.left.clone()?,
+                }
+                .replace_internal(key, value)?;
+                Rc::make_mut(&mut self).left = Some(left);
+            }
+            std::cmp::Ordering::Greater => {
+                let right = match Rc::get_mut(&mut self) {
+                    Some(this) => this.right.take()?,
+                    None => self.right.clone()?,
+                }
+                .replace_internal(key, value)?;
+                Rc::make_mut(&mut self).right = Some(right);
+            }
+        }
+        Some(self)
+    }
+
+    fn get_remove_internal(
+        root_opt: &mut Option<Rc<Self>>,
+        key: &Rc<dyn HashMapTreeKey>,
+    ) -> Option<Rc<dyn StackValue>> {
+        let new_root = {
+            let root = root_opt.as_mut()?;
+            match key.dyn_cmp(root.key.as_ref()) {
+                std::cmp::Ordering::Equal => {
+                    let (left, right) = match Rc::get_mut(root) {
+                        Some(this) => (this.left.take(), this.right.take()),
+                        None => (root.left.clone(), root.right.clone()),
+                    };
+
+                    Self::merge_internal(left, right)
+                }
+                std::cmp::Ordering::Less => {
+                    let mut left = match Rc::get_mut(root) {
+                        Some(this) => this.left.take(),
+                        None => root.left.clone(),
+                    };
+                    let value = Self::get_remove_internal(&mut left, key)?;
+                    Rc::make_mut(root).left = left;
+                    return Some(value);
+                }
+                std::cmp::Ordering::Greater => {
+                    let mut right = match Rc::get_mut(root) {
+                        Some(this) => this.right.take(),
+                        None => root.right.clone(),
+                    };
+                    let value = Self::get_remove_internal(&mut right, key)?;
+                    Rc::make_mut(root).right = right;
+                    return Some(value);
+                }
+            }
+        };
+
+        let value = match Rc::try_unwrap(root_opt.take().unwrap()) {
+            Ok(this) => this.value,
+            Err(this) => this.value.clone(),
+        };
+        *root_opt = new_root;
+        Some(value)
+    }
+
+    fn merge_internal(left: Option<Rc<Self>>, right: Option<Rc<Self>>) -> Option<Rc<Self>> {
+        match (left, right) {
+            (None, right) => right,
+            (left, None) => left,
+            (Some(mut left), Some(mut right)) => {
+                if left.rand_offset > right.rand_offset {
+                    let left_ref = Rc::make_mut(&mut left);
+                    left_ref.right = Self::merge_internal(left_ref.right.take(), Some(right));
+                    Some(left)
+                } else {
+                    let right_ref = Rc::make_mut(&mut right);
+                    right_ref.left = Self::merge_internal(Some(left), right_ref.left.take());
+                    Some(right)
+                }
+            }
+        }
+    }
+
+    fn split_internal(
+        mut self: Rc<Self>,
+        key: &Rc<dyn HashMapTreeKey>,
+    ) -> (Option<Rc<Self>>, Option<Rc<Self>>) {
+        match key.dyn_cmp(self.key.as_ref()) {
+            std::cmp::Ordering::Less => {
+                let Some(left) = (match Rc::get_mut(&mut self) {
+                    Some(this) => this.left.take(),
+                    None => self.left.clone(),
+                }) else {
+                    return (None, Some(self));
+                };
+
+                let (left, right) = Self::split_internal(left, key);
+                Rc::make_mut(&mut self).left = right;
+                (left, Some(self))
+            }
+            _ => {
+                let Some(right) = (match Rc::get_mut(&mut self) {
+                    Some(this) => this.right.take(),
+                    None => self.right.clone(),
+                }) else {
+                    return (Some(self), None);
+                };
+
+                let (left, right) = Self::split_internal(right, key);
+                Rc::make_mut(&mut self).right = left;
+                (Some(self), right)
+            }
+        }
+    }
+}
+
+pub trait HashMapTreeKey: StackValue {
+    fn dyn_cmp(&self, other: &dyn HashMapTreeKey) -> std::cmp::Ordering;
+    fn into_stack_value(self: Rc<Self>) -> Rc<dyn StackValue>;
 }
 
 #[derive(Debug, thiserror::Error)]
