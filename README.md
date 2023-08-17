@@ -32,22 +32,26 @@ cargo install --locked fift-cli
 ## Usage
 
 ```
-Usage: fift [<source_file>] [-n] [-I <include>] [-L <lib>]
+Usage: fift [<source_files...>] [-n] [-i] [-I <include>] [-L <lib>]
 
 A simple Fift interpreter. Type `bye` to quie, or `words` to get a list of all commands
 
 Positional Arguments:
-  source_file       an optional path to the source file (stdin will be used
-                    otherwise)
+  source_files      a list of source files to execute (stdin will be used if
+                    empty)
 
 Options:
   -n, --bare        do not preload standard preamble file `Fift.fif`
+  -i, --interactive force interactive mode even if explicit source file names
+                    are indicated
   -I, --include     sets color-separated library source include path. If not
                     indicated, $FIFTPATH is used instead
   -L, --lib         sets an explicit path to the library source file. If not
                     indicated, a default one will be used
   --help            display usage information
   -v, --version     print version information and exit
+  -s                script mode: use first argument as a fift source file and
+                    import remaining arguments as $n
 ```
 
 ## Contributing
@@ -56,9 +60,11 @@ We welcome contributions to the project! If you notice any issues or errors, fee
 
 ## License
 
-Licensed under either of
+* The `fift` and `fift-proc` library crates are licensed under either of
+  * Apache License, Version 2.0 ([/LICENSE-APACHE](LICENSE-APACHE) or <https://www.apache.org/licenses/LICENSE-2.0>)
+  * MIT license ([/LICENSE-MIT](LICENSE-MIT) or <https://opensource.org/licenses/MIT>)
 
-* Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE) or <https://www.apache.org/licenses/LICENSE-2.0>)
-* MIT license ([LICENSE-MIT](LICENSE-MIT) or <https://opensource.org/licenses/MIT>)
+  at your option.
 
-at your option.
+* The `fift-cli` binary crate is licensed under
+  * GNU Lesser General Public License v2.1 ([/cli/LICENSE](./cli/LICENSE) or <https://www.gnu.org/licenses/old-licenses/lgpl-2.1.html>)
