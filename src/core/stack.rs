@@ -19,6 +19,13 @@ pub struct Stack {
 }
 
 impl Stack {
+    pub fn make_null() -> Rc<dyn StackValue> {
+        thread_local! {
+            static NULL: Rc<dyn StackValue> = Rc::new(());
+        }
+        NULL.with(|v| v.clone())
+    }
+
     pub fn new(capacity: Option<usize>) -> Self {
         Self {
             items: Default::default(),
@@ -76,12 +83,30 @@ impl Stack {
         Ok(())
     }
 
+    pub fn push_null(&mut self) -> Result<()> {
+        self.push_raw(Self::make_null())
+    }
+
     pub fn push_bool(&mut self, value: bool) -> Result<()> {
         self.push(if value {
             -BigInt::one()
         } else {
             BigInt::zero()
         })
+    }
+
+    pub fn push_opt<T: StackValue + 'static>(&mut self, value: Option<T>) -> Result<()> {
+        match value {
+            None => self.push_null(),
+            Some(value) => self.push(value),
+        }
+    }
+
+    pub fn push_opt_raw(&mut self, value: Option<Rc<dyn StackValue>>) -> Result<()> {
+        match value {
+            None => self.push_null(),
+            Some(value) => self.push_raw(value),
+        }
     }
 
     pub fn push_int<T: Into<BigInt>>(&mut self, value: T) -> Result<()> {
@@ -215,6 +240,15 @@ impl Stack {
         self.pop()?.into_atom()
     }
 
+    pub fn pop_hashmap_owned(&mut self) -> Result<Option<Rc<HashMapTreeNode>>> {
+        let value = self.pop()?;
+        if value.is_null() {
+            Ok(None)
+        } else {
+            value.into_hashmap().map(Some)
+        }
+    }
+
     pub fn items(&self) -> &[Rc<dyn StackValue>] {
         &self.items
     }
@@ -272,7 +306,7 @@ macro_rules! define_stack_value {
             $({ $($other:tt)* })?
         }
     ),*$(,)?}) => {
-        #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
+        #[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
         pub enum $value_type {
             $($name),*,
         }
@@ -440,6 +474,12 @@ define_stack_value! {
             fmt_dump(v, f) = std::fmt::Display::fmt(v, f),
             as_atom(v): &Atom = Ok(v),
             into_atom,
+        },
+        HashMap(HashMapTreeNode) = {
+            eq(a, b) = a == b,
+            fmt_dump(v, f) = write!(f, "HashMap{{{:?}}}", &v as *const _),
+            as_hashmap(v): &HashMapTreeNode = Ok(v),
+            into_hashmap,
         }
     }
 }
@@ -631,7 +671,7 @@ pub struct SharedBox {
 
 impl Default for SharedBox {
     fn default() -> Self {
-        Self::new(Rc::new(()))
+        Self::new(Stack::make_null())
     }
 }
 
@@ -646,12 +686,27 @@ impl SharedBox {
         *self.value.borrow_mut() = value;
     }
 
+    pub fn store_opt<T: StackValue + 'static>(&self, value: Option<Rc<T>>) {
+        *self.value.borrow_mut() = match value {
+            None => Stack::make_null(),
+            Some(value) => value,
+        };
+    }
+
     pub fn fetch(&self) -> Rc<dyn StackValue> {
         self.value.borrow().clone()
     }
+
+    pub fn take(&self) -> Rc<dyn StackValue> {
+        std::mem::replace(&mut *self.value.borrow_mut(), Stack::make_null())
+    }
+
+    pub fn borrow(&self) -> std::cell::Ref<'_, Rc<dyn StackValue>> {
+        self.value.borrow()
+    }
 }
 
-#[derive(Clone, Eq, PartialEq, Hash)]
+#[derive(Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
 pub enum Atom {
     Unnamed(i32),
     Named(Rc<str>),
@@ -710,15 +765,22 @@ impl Atoms {
 
 #[derive(Clone)]
 pub struct HashMapTreeNode {
-    key: Rc<dyn HashMapTreeKey>,
-    value: Rc<dyn StackValue>,
-    left: Option<Rc<HashMapTreeNode>>,
-    right: Option<Rc<HashMapTreeNode>>,
-    rand_offset: u64,
+    pub key: HashMapTreeKey,
+    pub value: Rc<dyn StackValue>,
+    pub left: Option<Rc<HashMapTreeNode>>,
+    pub right: Option<Rc<HashMapTreeNode>>,
+    pub rand_offset: u64,
+}
+
+impl Eq for HashMapTreeNode {}
+impl PartialEq for HashMapTreeNode {
+    fn eq(&self, other: &Self) -> bool {
+        self.key == other.key && self.value.is_equal(other.value.as_ref())
+    }
 }
 
 impl HashMapTreeNode {
-    pub fn new(key: Rc<dyn HashMapTreeKey>, value: Rc<dyn StackValue>) -> Self {
+    pub fn new(key: HashMapTreeKey, value: Rc<dyn StackValue>) -> Self {
         Self {
             key,
             value,
@@ -728,13 +790,65 @@ impl HashMapTreeNode {
         }
     }
 
-    pub fn lookup<'a>(
+    pub fn iter(&self) -> HashMapTreeIter<'_> {
+        self.into_iter()
+    }
+
+    pub fn lookup<K>(root_opt: &Option<Rc<Self>>, key: K) -> Option<&'_ Rc<HashMapTreeNode>>
+    where
+        K: AsHashMapTreeKeyRef,
+    {
+        Self::lookup_internal(root_opt, &key.as_equivalent())
+    }
+
+    pub fn set(root_opt: &mut Option<Rc<Self>>, key: &HashMapTreeKey, value: &Rc<dyn StackValue>) {
+        // TODO: insert new during replace
+        if !key.stack_value.is_null()
+            && !Self::replace(root_opt, key.as_equivalent(), value)
+            && !value.is_null()
+        {
+            Self::insert_internal(root_opt, key, value, rand::thread_rng().gen())
+        }
+    }
+
+    pub fn replace<K>(root_opt: &mut Option<Rc<Self>>, key: K, value: &Rc<dyn StackValue>) -> bool
+    where
+        K: AsHashMapTreeKeyRef,
+    {
+        let key = key.as_equivalent();
+        if key.stack_value.is_null() {
+            false
+        } else if value.is_null() {
+            Self::remove_internal(root_opt, &key).is_some()
+        } else if let Some(root) = root_opt {
+            root.replace_internal(&key, value)
+        } else {
+            false
+        }
+    }
+
+    pub fn remove<K>(root_opt: &mut Option<Rc<Self>>, key: K) -> Option<Rc<dyn StackValue>>
+    where
+        K: AsHashMapTreeKeyRef,
+    {
+        let key = key.as_equivalent();
+        if key.stack_value.is_null() {
+            None
+        } else {
+            match Self::remove_internal(root_opt, &key) {
+                Some(value) if !value.is_null() => Some(value),
+                _ => None,
+            }
+        }
+    }
+
+    pub fn lookup_internal<'a>(
         root_opt: &'a Option<Rc<Self>>,
-        key: &dyn HashMapTreeKey,
+        key: &HashMapTreeKeyRef<'_>,
     ) -> Option<&'a Rc<HashMapTreeNode>> {
         let mut root = root_opt.as_ref()?;
         loop {
-            root = match key.dyn_cmp(root.key.as_ref()) {
+            root = match key.cmp_owned(&root.key) {
                 std::cmp::Ordering::Equal => return Some(root),
                 std::cmp::Ordering::Less => root.left.as_ref()?,
                 std::cmp::Ordering::Greater => root.right.as_ref()?,
@@ -742,53 +856,9 @@ impl HashMapTreeNode {
         }
     }
 
-    pub fn set(
-        root_opt: &mut Option<Rc<Self>>,
-        key: &Rc<dyn HashMapTreeKey>,
-        value: &Rc<dyn StackValue>,
-    ) {
-        // TODO: insert new during replace
-        if key.as_ref().ty() != StackValueType::Null
-            && !Self::replace(root_opt, key, value)
-            && !value.is_null()
-        {
-            Self::insert_internal(root_opt, key, value, rand::thread_rng().gen())
-        }
-    }
-
-    pub fn replace(
-        root_opt: &mut Option<Rc<Self>>,
-        key: &Rc<dyn HashMapTreeKey>,
-        value: &Rc<dyn StackValue>,
-    ) -> bool {
-        if key.as_ref().ty() == StackValueType::Null {
-            false
-        } else if value.is_null() {
-            Self::remove_internal(root_opt, key).is_some()
-        } else if let Some(root) = root_opt {
-            root.replace_internal(key, value)
-        } else {
-            false
-        }
-    }
-
-    pub fn remove(
-        root_opt: &mut Option<Rc<Self>>,
-        key: &Rc<dyn HashMapTreeKey>,
-    ) -> Option<Rc<dyn StackValue>> {
-        if key.as_ref().ty() == StackValueType::Null {
-            None
-        } else {
-            match Self::remove_internal(root_opt, key) {
-                Some(value) if !value.is_null() => Some(value),
-                _ => None,
-            }
-        }
-    }
-
     fn insert_internal(
         root_opt: &mut Option<Rc<Self>>,
-        key: &Rc<dyn HashMapTreeKey>,
+        key: &HashMapTreeKey,
         value: &Rc<dyn StackValue>,
         rand_offset: u64,
     ) {
@@ -814,7 +884,7 @@ impl HashMapTreeNode {
             })
         } else {
             let this = Rc::make_mut(&mut root);
-            let branch = if key.dyn_cmp(this.key.as_ref()) == std::cmp::Ordering::Less {
+            let branch = if key < &this.key {
                 &mut this.left
             } else {
                 &mut this.right
@@ -826,15 +896,15 @@ impl HashMapTreeNode {
 
     fn replace_internal(
         self: &mut Rc<Self>,
-        key: &Rc<dyn HashMapTreeKey>,
+        key: &HashMapTreeKeyRef<'_>,
         value: &Rc<dyn StackValue>,
     ) -> bool {
         fn replace_internal_impl(
             root: &mut Rc<HashMapTreeNode>,
-            key: &Rc<dyn HashMapTreeKey>,
+            key: &HashMapTreeKeyRef<'_>,
             value: &Rc<dyn StackValue>,
         ) -> Option<()> {
-            match key.dyn_cmp(root.key.as_ref()) {
+            match key.cmp_owned(&root.key) {
                 std::cmp::Ordering::Equal => {
                     let this = Rc::make_mut(root);
                     this.value = value.clone();
@@ -864,11 +934,11 @@ impl HashMapTreeNode {
 
     fn remove_internal(
         root_opt: &mut Option<Rc<Self>>,
-        key: &Rc<dyn HashMapTreeKey>,
+        key: &HashMapTreeKeyRef<'_>,
     ) -> Option<Rc<dyn StackValue>> {
         let new_root = {
             let root = root_opt.as_mut()?;
-            match key.dyn_cmp(root.key.as_ref()) {
+            match key.cmp_owned(&root.key) {
                 std::cmp::Ordering::Equal => {
                     let (left, right) = match Rc::get_mut(root) {
                         Some(this) => (this.left.take(), this.right.take()),
@@ -929,9 +999,9 @@ impl HashMapTreeNode {
 
     fn split_internal(
         mut self: Rc<Self>,
-        key: &Rc<dyn HashMapTreeKey>,
+        key: &HashMapTreeKey,
     ) -> (Option<Rc<Self>>, Option<Rc<Self>>) {
-        match key.dyn_cmp(self.key.as_ref()) {
+        match key.cmp(&self.key) {
             std::cmp::Ordering::Less => {
                 let Some(left) = (match Rc::get_mut(&mut self) {
                     Some(this) => this.left.take(),
@@ -960,18 +1030,99 @@ impl HashMapTreeNode {
     }
 }
 
+impl<'a> IntoIterator for &'a HashMapTreeNode {
+    type IntoIter = HashMapTreeIter<'a>;
+    type Item = &'a HashMapTreeNode;
+
+    fn into_iter(self) -> Self::IntoIter {
+        HashMapTreeIter {
+            stack: vec![(self, None)],
+        }
+    }
+}
+
+pub struct HashMapTreeIter<'a> {
+    stack: Vec<(&'a HashMapTreeNode, Option<bool>)>,
+}
+
+impl<'a> Iterator for HashMapTreeIter<'a> {
+    type Item = &'a HashMapTreeNode;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        Some(loop {
+            match self.stack.last_mut()? {
+                (node, pos @ None) => {
+                    *pos = Some(false);
+                    break *node;
+                }
+                (node, pos @ Some(false)) => {
+                    *pos = Some(true);
+                    if let Some(next) = node.left.as_deref() {
+                        self.stack.push((next, None))
+                    }
+                }
+                (node, Some(true)) => {
+                    if let Some(next) = node.right.as_deref() {
+                        *node = next;
+                    } else {
+                        self.stack.pop();
+                    }
+                }
+            };
+        })
+    }
+}
+
+#[derive(Default)]
+pub struct HashMapTreeIntoIter {
+    stack: Vec<(Rc<HashMapTreeNode>, Option<bool>)>,
+}
+
+impl Iterator for HashMapTreeIntoIter {
+    type Item = Rc<HashMapTreeNode>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        Some(loop {
+            match self.stack.last_mut()? {
+                (node, pos @ None) => {
+                    *pos = Some(false);
+                    break node.clone();
+                }
+                (node, pos @ Some(false)) => {
+                    *pos = Some(true);
+                    if let Some(next) = node.left.clone() {
+                        self.stack.push((next, None))
+                    }
+                }
+                (node, Some(true)) => {
+                    if let Some(next) = node.right.clone() {
+                        *node = next;
+                    } else {
+                        self.stack.pop();
+                    }
+                }
+            };
+        })
+    }
+}
+
+pub trait AsHashMapTreeKeyRef {
+    fn as_equivalent(&self) -> HashMapTreeKeyRef<'_>;
+}
+
+#[derive(Clone)]
 pub struct HashMapTreeKey {
-    hash: u64,
-    stack_value: Rc<dyn StackValue>,
+    pub hash: u64,
+    pub stack_value: Rc<dyn StackValue>,
 }
 
 impl HashMapTreeKey {
-    pub fn new(value: Rc<dyn StackValue>) -> Result<Self> {
-        thread_local! {
-            static HASHER_STATE: ahash::RandomState = ahash::RandomState::new();
-        }
+    thread_local! {
+        static HASHER_STATE: ahash::RandomState = ahash::RandomState::new();
+    }
 
-        let hash = HASHER_STATE.with(|hasher| {
+    pub fn new(value: Rc<dyn StackValue>) -> Result<Self> {
+        let hash = Self::HASHER_STATE.with(|hasher| {
             Ok(match value.ty() {
                 StackValueType::Null => 0,
                 StackValueType::Int => hasher.hash_one(value.as_int()?),
@@ -989,22 +1140,18 @@ impl HashMapTreeKey {
     }
 }
 
-impl Eq for HashMapTreeKey {}
-impl PartialEq for HashMapTreeKey {
-    #[inline]
-    fn eq(&self, other: &Self) -> bool {
-        self.cmp(other) == std::cmp::Ordering::Equal
+impl AsHashMapTreeKeyRef for HashMapTreeKey {
+    fn as_equivalent(&self) -> HashMapTreeKeyRef<'_> {
+        HashMapTreeKeyRef {
+            hash: self.hash,
+            stack_value: self.stack_value.as_ref(),
+        }
     }
 }
 
 impl Ord for HashMapTreeKey {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        match self.hash.cmp(&other.hash) {
-            std::cmp::Ordering::Equal => {}
-            ord => return ord,
-        }
-
-        self.stack_value
+        self.as_equivalent().cmp_owned(other)
     }
 }
 
@@ -1012,6 +1159,72 @@ impl PartialOrd for HashMapTreeKey {
     #[inline]
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         Some(self.cmp(other))
+    }
+}
+
+impl Eq for HashMapTreeKey {}
+impl PartialEq for HashMapTreeKey {
+    #[inline]
+    fn eq(&self, other: &Self) -> bool {
+        self.cmp(other).is_eq()
+    }
+}
+
+#[derive(Clone, Copy)]
+pub struct HashMapTreeKeyRef<'a> {
+    hash: u64,
+    stack_value: &'a dyn StackValue,
+}
+
+impl AsHashMapTreeKeyRef for HashMapTreeKeyRef<'_> {
+    fn as_equivalent(&self) -> HashMapTreeKeyRef<'_> {
+        *self
+    }
+}
+
+impl<'a> From<&'a String> for HashMapTreeKeyRef<'a> {
+    fn from(stack_value: &'a String) -> Self {
+        HashMapTreeKey::HASHER_STATE.with(|hasher| Self {
+            hash: hasher.hash_one(stack_value),
+            stack_value,
+        })
+    }
+}
+
+impl HashMapTreeKeyRef<'_> {
+    fn cmp_owned(&self, other: &HashMapTreeKey) -> std::cmp::Ordering {
+        match self.hash.cmp(&other.hash) {
+            std::cmp::Ordering::Equal => {}
+            ord => return ord,
+        }
+
+        let ty = self.stack_value.ty();
+        match ty.cmp(&other.stack_value.ty()) {
+            std::cmp::Ordering::Equal => {}
+            ord => return ord,
+        }
+
+        macro_rules! match_ty_cmp {
+            ($ty: ident, { $($ident:ident => $cast:ident),*$(,)? }) => {
+                match $ty {
+                    $(StackValueType::$ident => {
+                        if let (Ok(a), Ok(b)) = (self.stack_value.$cast(), other.stack_value.$cast()) {
+                            return a.cmp(b);
+                        }
+                    })*
+                    _ => {}
+                }
+            };
+        }
+
+        match_ty_cmp!(ty, {
+            Int => as_int,
+            Atom => as_atom,
+            String => as_string,
+            Bytes => as_bytes,
+        });
+
+        std::cmp::Ordering::Equal
     }
 }
 

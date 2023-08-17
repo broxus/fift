@@ -17,7 +17,7 @@ pub struct DictUtils;
 impl DictUtils {
     #[cmd(name = "dictnew", stack)]
     fn interpret_dict_new(stack: &mut Stack) -> Result<()> {
-        stack.push(())
+        stack.push_null()
     }
 
     #[cmd(name = "dict>s", stack)]
@@ -41,7 +41,7 @@ impl DictUtils {
         let mut cs_raw = stack.pop_slice()?;
         let mut cs = cs_raw.apply()?;
         let cell = Option::<Cell>::load_from(&mut cs)?;
-        push_maybe_cell(stack, cell)?;
+        stack.push_opt(cell)?;
         if fetch {
             let range = cs.range();
             Rc::make_mut(&mut cs_raw).set_range(range);
@@ -94,7 +94,7 @@ impl DictUtils {
         // TODO: use operation result flag?
         let res = dict.is_ok();
         if let Ok((cell, _)) = dict {
-            push_maybe_cell(stack, cell)?;
+            stack.push_opt(cell)?;
         }
         stack.push_bool(res)
     }
@@ -132,7 +132,7 @@ impl DictUtils {
     #[cmd(name = "idict-", stack, args(key = KeyMode::Signed, ignore = true))]
     fn interpret_dict_remove(stack: &mut Stack, key: KeyMode, ignore: bool) -> Result<()> {
         let bits = stack.pop_smallint_range(0, MAX_KEY_BITS)? as u16;
-        let cell = pop_maybe_cell(stack)?;
+        let dict = pop_maybe_cell(stack)?;
         let key = pop_dict_key(stack, key, bits)?;
         anyhow::ensure!(
             key.range().remaining_bits() >= bits,
@@ -141,7 +141,7 @@ impl DictUtils {
 
         let key = &mut key.apply()?.get_prefix(bits, 0);
         let value = dict_remove_owned(
-            cell.as_ref(),
+            dict.as_ref(),
             key,
             bits,
             false,
@@ -151,10 +151,10 @@ impl DictUtils {
 
         let (dict, value) = match value {
             Some((dict, value)) => (dict, value),
-            None => (cell.clone(), None),
+            None => (dict.clone(), None),
         };
 
-        push_maybe_cell(stack, dict)?;
+        stack.push_opt(dict)?;
 
         let found = value.is_some();
         if !ignore {
@@ -287,7 +287,7 @@ impl LoopContImpl for DictMapCont {
     }
 
     fn finalize(&mut self, ctx: &mut Context) -> Result<bool> {
-        push_maybe_cell(&mut ctx.stack, self.result.take())?;
+        ctx.stack.push_opt(self.result.take())?;
         Ok(true)
     }
 }
@@ -333,9 +333,9 @@ impl LoopContImpl for DictDiffCont {
             ctx.stack.push(builder_to_int(&key, false)?)?;
             if !swap {
                 ctx.stack.push(value)?;
-                ctx.stack.push(())?;
+                ctx.stack.push_null()?;
             } else {
-                ctx.stack.push(())?;
+                ctx.stack.push_null()?;
                 ctx.stack.push(value)?;
             }
             break true;
@@ -430,7 +430,7 @@ impl LoopContImpl for DictMergeCont {
     }
 
     fn finalize(&mut self, ctx: &mut Context) -> Result<bool> {
-        push_maybe_cell(&mut ctx.stack, self.result.take())?;
+        ctx.stack.push_opt(self.result.take())?;
         Ok(true)
     }
 }
@@ -505,13 +505,6 @@ enum KeyMode {
     Slice,
     Unsigned,
     Signed,
-}
-
-fn push_maybe_cell(stack: &mut Stack, cell: Option<Cell>) -> Result<()> {
-    match cell {
-        Some(cell) => stack.push(cell),
-        None => stack.push(()),
-    }
 }
 
 fn pop_maybe_cell(stack: &mut Stack) -> Result<Option<Cell>> {

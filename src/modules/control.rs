@@ -34,7 +34,7 @@ impl Control {
         if let Some(next) = ctx.next.take() {
             ctx.stack.push(next)?;
         } else {
-            ctx.stack.push(())?;
+            ctx.stack.push_null()?;
         }
         Ok(Some(next.as_ref().clone()))
     }
@@ -164,12 +164,15 @@ impl Control {
     #[cmd(name = "'", active)]
     fn interpret_tick(ctx: &mut Context) -> Result<()> {
         let word = ctx.input.scan_word()?.ok_or(UnexpectedEof)?;
-        let entry = match ctx.dictionary.lookup(word.data) {
+        let mut word = word.data.to_owned();
+        let entry = match ctx.dictionary.lookup(&word)? {
             Some(entry) => entry,
-            None => ctx
-                .dictionary
-                .lookup(&format!("{} ", word.data))
-                .with_context(|| format!("Undefined word `{}`", word.data))?,
+            None => {
+                word.push(' ');
+                ctx.dictionary
+                    .lookup(&word)?
+                    .with_context(|| format!("Undefined word `{word}`"))?
+            }
         };
         ctx.stack.push(entry.definition.clone())?;
         ctx.stack.push_argcount(1, ctx.dictionary.make_nop())
@@ -185,10 +188,10 @@ impl Control {
     #[cmd(name = "find")]
     fn interpret_find(ctx: &mut Context) -> Result<()> {
         let word = ctx.stack.pop_string()?;
-        let entry = match ctx.dictionary.lookup(&word) {
+        let entry = match ctx.dictionary.lookup(&word)? {
             Some(entry) => Some(entry),
             // TODO: split dictionaries for prefix words
-            None => ctx.dictionary.lookup(&format!("{word} ")),
+            None => ctx.dictionary.lookup(&format!("{word} "))?,
         };
         match entry {
             Some(entry) => {
@@ -263,14 +266,14 @@ impl Control {
             word.data.to_owned()
         };
 
-        if ctx.dictionary.lookup(&word).is_none() {
+        if ctx.dictionary.lookup(&word)?.is_none() {
             word.push(' ');
-            if ctx.dictionary.lookup(&word).is_none() {
+            if ctx.dictionary.lookup(&word)?.is_none() {
                 anyhow::bail!("Undefined word `{}`", word.trim());
             }
         }
 
-        ctx.dictionary.undefine_word(&word);
+        ctx.dictionary.undefine_word(&word)?;
         Ok(())
     }
 

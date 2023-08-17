@@ -29,7 +29,7 @@ impl CmdArgsUtils {
     fn init(&self, d: &mut Dictionary) -> Result<()> {
         d.define_word("$0 ", Rc::new(cont::LitCont(self.name.clone())))?;
 
-        let mut list = Rc::new(()) as Rc<dyn StackValue>;
+        let mut list = Stack::make_null();
         for (i, arg) in self.args.iter().enumerate().rev() {
             list = cons(arg.clone(), list);
             d.define_word(format!("${} ", i + 1), Rc::new(cont::LitCont(arg.clone())))?;

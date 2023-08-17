@@ -35,7 +35,7 @@ impl FiftModule for BaseModule {
 
     #[cmd(name = "null", stack)]
     fn interpret_push_null(stack: &mut Stack) -> Result<()> {
-        stack.push(())
+        stack.push_null()
     }
 
     #[cmd(name = "null?", stack, args(ty = StackValueType::Null))]

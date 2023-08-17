@@ -1,13 +1,37 @@
-use std::collections::hash_map::{self, HashMap};
 use std::rc::Rc;
 
 use anyhow::Result;
 
 use super::cont::{Cont, ContImpl, ContextTailWordFunc, ContextWordFunc, StackWordFunc};
+use super::stack::{HashMapTreeKey, HashMapTreeKeyRef, HashMapTreeNode, SharedBox, StackValue};
+use super::StackValueType;
 
 pub struct DictionaryEntry {
     pub definition: Cont,
     pub active: bool,
+}
+
+impl DictionaryEntry {
+    fn try_from_value(value: &dyn StackValue) -> Option<Self> {
+        let (cont, active) = Self::cont_from_value(value)?;
+        Some(Self {
+            definition: cont.clone(),
+            active,
+        })
+    }
+
+    fn cont_from_value(value: &dyn StackValue) -> Option<(&Cont, bool)> {
+        if let Ok(cont) = value.as_cont() {
+            return Some((cont, false));
+        } else if let Ok(tuple) = value.as_tuple() {
+            if tuple.len() == 1 {
+                if let Ok(cont) = tuple.first()?.as_cont() {
+                    return Some((cont, true));
+                }
+            }
+        }
+        None
+    }
 }
 
 impl From<Cont> for DictionaryEntry {
@@ -28,8 +52,19 @@ impl<T: ContImpl + 'static> From<Rc<T>> for DictionaryEntry {
     }
 }
 
+impl From<DictionaryEntry> for Rc<dyn StackValue> {
+    fn from(value: DictionaryEntry) -> Self {
+        let cont: Rc<dyn StackValue> = Rc::new(value.definition);
+        if value.active {
+            Rc::new(vec![cont])
+        } else {
+            cont
+        }
+    }
+}
+
 pub struct Dictionary {
-    words: WordsMap,
+    words: Rc<SharedBox>,
     nop: Cont,
 }
 
@@ -69,22 +104,38 @@ impl Dictionary {
         std::ptr::eq(left, right)
     }
 
-    pub fn words(&self) -> impl Iterator<Item = &String> {
-        self.words.keys()
+    pub fn words(&self) -> &Rc<SharedBox> {
+        &self.words
     }
 
-    pub fn lookup(&self, name: &str) -> Option<&DictionaryEntry> {
-        self.words.get(name)
+    pub fn lookup(&self, name: &String) -> Result<Option<DictionaryEntry>> {
+        let words = self.words.fetch();
+        let map = match words.ty() {
+            StackValueType::Null => None,
+            _ => Some(words.into_hashmap()?),
+        };
+        let key = HashMapTreeKeyRef::from(name);
+        let Some(node) = HashMapTreeNode::lookup(&map, key) else {
+            return Ok(None);
+        };
+        Ok(DictionaryEntry::try_from_value(node.value.as_ref()))
     }
 
-    pub fn resolve_name(&self, definition: &dyn ContImpl) -> Option<&str> {
-        for (name, entry) in &self.words {
-            // NOTE: erase trait data from fat pointers
-            let left = Rc::as_ptr(&entry.definition) as *const ();
-            let right = definition as *const _ as *const ();
-            // Compare only the address part
-            if std::ptr::eq(left, right) {
-                return Some(name);
+    pub fn resolve_name(&self, definition: &dyn ContImpl) -> Option<Rc<String>> {
+        let map = self.words.borrow();
+        if let Ok(map) = map.as_hashmap() {
+            for entry in map {
+                let Some((cont, _)) = DictionaryEntry::cont_from_value(entry.value.as_ref()) else {
+                    continue;
+                };
+
+                // NOTE: erase trait data from fat pointers
+                let left = Rc::as_ptr(cont) as *const ();
+                let right = definition as *const _ as *const ();
+                // Compare only the address part
+                if std::ptr::eq(left, right) {
+                    return entry.key.stack_value.clone().into_string().ok();
+                }
             }
         }
         None
@@ -156,29 +207,39 @@ impl Dictionary {
         E: Into<DictionaryEntry>,
     {
         fn define_word_impl(
-            words: &mut WordsMap,
+            words: &SharedBox,
             name: String,
             word: DictionaryEntry,
-            allow_redefine: bool,
+            _: bool,
         ) -> Result<()> {
-            match words.entry(name.clone()) {
-                hash_map::Entry::Vacant(entry) => {
-                    entry.insert(word);
-                    Ok(())
-                }
-                hash_map::Entry::Occupied(mut entry) if allow_redefine => {
-                    entry.insert(word);
-                    Ok(())
-                }
-                _ => anyhow::bail!("Word `{name}` unexpectedly redefined"),
-            }
+            let old_words = words.take();
+            let mut map = if old_words.is_null() {
+                None
+            } else {
+                Some(old_words.into_hashmap()?)
+            };
+
+            let key = HashMapTreeKey::new(Rc::new(name))?;
+            let value = &word.into();
+            HashMapTreeNode::set(&mut map, &key, value);
+
+            words.store_opt(map);
+            Ok(())
         }
-        define_word_impl(&mut self.words, name.into(), word.into(), allow_redefine)
+        define_word_impl(&self.words, name.into(), word.into(), allow_redefine)
     }
 
-    pub fn undefine_word(&mut self, name: &str) -> bool {
-        self.words.remove(name).is_some()
+    pub fn undefine_word(&mut self, name: &String) -> Result<bool> {
+        let old_words = self.words.take();
+        let mut map = if old_words.is_null() {
+            None
+        } else {
+            Some(old_words.into_hashmap()?)
+        };
+
+        let key = HashMapTreeKeyRef::from(name);
+        let res = HashMapTreeNode::remove(&mut map, key).is_some();
+        self.words.store_opt(map);
+        Ok(res)
     }
 }
-
-type WordsMap = HashMap<String, DictionaryEntry>;

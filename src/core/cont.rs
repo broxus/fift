@@ -106,23 +106,27 @@ impl ContImpl for InterpreterCont {
 
                     let mut prefix_entry = None;
 
-                    // Find the largest subtoken first
-                    for subtoken in token.subtokens() {
-                        if let Some(entry) = ctx.dictionary.lookup(subtoken) {
-                            rewind = token.delta(subtoken);
-                            prefix_entry = Some(entry);
-                            break;
-                        }
-                    }
-
                     // Find in predefined entries
                     if let Some(entry) = WORD.with(|word| {
                         let mut word = word.borrow_mut();
                         word.clear();
                         word.push_str(token.data);
+
+                        // Find the largest subtoken first
+                        while !word.is_empty() {
+                            if let Some(entry) = ctx.dictionary.lookup(&word)? {
+                                rewind = token.delta(&word);
+                                prefix_entry = Some(entry);
+                                break;
+                            }
+                            word.pop();
+                        }
+
+                        word.clear();
+                        word.push_str(token.data);
                         word.push(' ');
                         ctx.dictionary.lookup(&word)
-                    }) {
+                    })? {
                         rewind = 0;
                         break 'entry entry;
                     } else if let Some(entry) = prefix_entry {
