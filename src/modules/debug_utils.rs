@@ -145,17 +145,26 @@ impl DebugUtils {
         stack.push(string)
     }
 
-    // #[cmd(name = "words")]
-    // fn interpret_words(ctx: &mut Context) -> Result<()> {
-    //     let mut all_words = ctx.dictionary.words().collect::<Vec<_>>();
-    //     all_words.sort();
-    //     let mut first = true;
-    //     for word in all_words {
-    //         let space = if std::mem::take(&mut first) { "" } else { " " };
-    //         write!(ctx.stdout, "{space}{word}")?;
-    //     }
-    //     Ok(())
-    // }
+    #[cmd(name = "words")]
+    fn interpret_words(ctx: &mut Context) -> Result<()> {
+        let Some(map) = ctx.dictionary.clone_words_map()? else {
+            return Ok(());
+        };
+
+        let mut all_words = map
+            .as_ref()
+            .into_iter()
+            .map(|entry| entry.key.stack_value.as_string())
+            .collect::<Result<Vec<_>>>()?;
+        all_words.sort();
+
+        let mut first = true;
+        for word in all_words {
+            let space = if std::mem::take(&mut first) { "" } else { " " };
+            write!(ctx.stdout, "{space}{word}")?;
+        }
+        Ok(())
+    }
 }
 
 const fn opt_space(space_after: bool) -> &'static str {

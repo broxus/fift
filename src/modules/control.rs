@@ -370,13 +370,12 @@ fn define_word(d: &mut Dictionary, mut word: String, cont: Cont, mode: DefMode) 
     if !mode.prefix {
         word.push(' ');
     }
-    d.define_word_ext(
+    d.define_word(
         word,
         DictionaryEntry {
             definition: cont,
             active: mode.active,
         },
-        true,
     )
 }
 

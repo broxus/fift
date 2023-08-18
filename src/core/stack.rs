@@ -1061,9 +1061,10 @@ impl<'a> Iterator for HashMapTreeIter<'a> {
                         self.stack.push((next, None))
                     }
                 }
-                (node, Some(true)) => {
+                (node, pos @ Some(true)) => {
                     if let Some(next) = node.right.as_deref() {
                         *node = next;
+                        *pos = None;
                     } else {
                         self.stack.pop();
                     }
@@ -1094,9 +1095,10 @@ impl Iterator for HashMapTreeIntoIter {
                         self.stack.push((next, None))
                     }
                 }
-                (node, Some(true)) => {
+                (node, pos @ Some(true)) => {
                     if let Some(next) = node.right.clone() {
                         *node = next;
+                        *pos = None;
                     } else {
                         self.stack.pop();
                     }
@@ -1137,6 +1139,15 @@ impl HashMapTreeKey {
             hash,
             stack_value: value,
         })
+    }
+}
+
+impl From<String> for HashMapTreeKey {
+    fn from(value: String) -> Self {
+        Self {
+            hash: Self::HASHER_STATE.with(|hasher| hasher.hash_one(&value)),
+            stack_value: Rc::new(value),
+        }
     }
 }
 

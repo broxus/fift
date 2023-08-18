@@ -104,16 +104,33 @@ impl Dictionary {
         std::ptr::eq(left, right)
     }
 
-    pub fn words(&self) -> &Rc<SharedBox> {
+    pub fn words_box(&self) -> &Rc<SharedBox> {
         &self.words
     }
 
-    pub fn lookup(&self, name: &String) -> Result<Option<DictionaryEntry>> {
+    pub fn clone_words_map(&self) -> Result<Option<Rc<HashMapTreeNode>>> {
         let words = self.words.fetch();
-        let map = match words.ty() {
+        Ok(match words.ty() {
             StackValueType::Null => None,
             _ => Some(words.into_hashmap()?),
+        })
+    }
+
+    pub fn use_words_map(&mut self) -> Result<WordsRefMut<'_>> {
+        let words = self.words.take();
+        let map = if words.is_null() {
+            None
+        } else {
+            Some(words.into_hashmap()?)
         };
+        Ok(WordsRefMut {
+            words_box: &mut self.words,
+            map,
+        })
+    }
+
+    pub fn lookup(&self, name: &String) -> Result<Option<DictionaryEntry>> {
+        let map = self.clone_words_map()?;
         let key = HashMapTreeKeyRef::from(name);
         let Some(node) = HashMapTreeNode::lookup(&map, key) else {
             return Ok(None);
@@ -198,48 +215,48 @@ impl Dictionary {
         T: Into<String>,
         E: Into<DictionaryEntry>,
     {
-        self.define_word_ext(name, word, false)
-    }
+        fn define_word_impl(d: &mut Dictionary, name: String, word: DictionaryEntry) -> Result<()> {
+            let mut map = d.use_words_map()?;
 
-    pub fn define_word_ext<T, E>(&mut self, name: T, word: E, allow_redefine: bool) -> Result<()>
-    where
-        T: Into<String>,
-        E: Into<DictionaryEntry>,
-    {
-        fn define_word_impl(
-            words: &SharedBox,
-            name: String,
-            word: DictionaryEntry,
-            _: bool,
-        ) -> Result<()> {
-            let old_words = words.take();
-            let mut map = if old_words.is_null() {
-                None
-            } else {
-                Some(old_words.into_hashmap()?)
-            };
-
-            let key = HashMapTreeKey::new(Rc::new(name))?;
+            let key = HashMapTreeKey::from(name);
             let value = &word.into();
             HashMapTreeNode::set(&mut map, &key, value);
-
-            words.store_opt(map);
             Ok(())
         }
-        define_word_impl(&self.words, name.into(), word.into(), allow_redefine)
+        define_word_impl(self, name.into(), word.into())
     }
 
     pub fn undefine_word(&mut self, name: &String) -> Result<bool> {
-        let old_words = self.words.take();
-        let mut map = if old_words.is_null() {
-            None
-        } else {
-            Some(old_words.into_hashmap()?)
-        };
+        let mut map = self.use_words_map()?;
 
         let key = HashMapTreeKeyRef::from(name);
-        let res = HashMapTreeNode::remove(&mut map, key).is_some();
-        self.words.store_opt(map);
-        Ok(res)
+        Ok(HashMapTreeNode::remove(&mut map, key).is_some())
+    }
+}
+
+pub struct WordsRefMut<'a> {
+    words_box: &'a mut Rc<SharedBox>,
+    map: Option<Rc<HashMapTreeNode>>,
+}
+
+impl std::ops::Deref for WordsRefMut<'_> {
+    type Target = Option<Rc<HashMapTreeNode>>;
+
+    #[inline]
+    fn deref(&self) -> &Self::Target {
+        &self.map
+    }
+}
+
+impl std::ops::DerefMut for WordsRefMut<'_> {
+    #[inline]
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.map
+    }
+}
+
+impl Drop for WordsRefMut<'_> {
+    fn drop(&mut self) {
+        self.words_box.store_opt(self.map.take());
     }
 }
