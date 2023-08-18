@@ -17,7 +17,7 @@ impl StringUtils {
     fn interpret_quote_str(ctx: &mut Context) -> Result<()> {
         let word = ctx.input.scan_until('"')?;
         ctx.stack.push(word.data.to_owned())?;
-        ctx.stack.push_argcount(1, ctx.dictionary.make_nop())
+        ctx.stack.push_argcount(1, cont::NopCont::instance())
     }
 
     #[cmd(name = "char", active)]
@@ -27,7 +27,7 @@ impl StringUtils {
         let char = chars.next().ok_or(UnexpectedEof)?;
         anyhow::ensure!(chars.next().is_none(), "Expected exactly one character");
         ctx.stack.push_int(char as u32)?;
-        ctx.stack.push_argcount(1, ctx.dictionary.make_nop())
+        ctx.stack.push_argcount(1, cont::NopCont::instance())
     }
 
     #[cmd(name = "(char)", stack)]

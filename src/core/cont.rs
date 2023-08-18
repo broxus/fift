@@ -138,9 +138,9 @@ impl ContImpl for InterpreterCont {
                         ctx.stack.push(value.num)?;
                         if let Some(denom) = value.denom {
                             ctx.stack.push(denom)?;
-                            ctx.stack.push_argcount(2, ctx.dictionary.make_nop())?;
+                            ctx.stack.push_argcount(2, NopCont::instance())?;
                         } else {
-                            ctx.stack.push_argcount(1, ctx.dictionary.make_nop())?;
+                            ctx.stack.push_argcount(1, NopCont::instance())?;
                         }
                         break 'token;
                     }
@@ -160,11 +160,8 @@ impl ContImpl for InterpreterCont {
                 }
             };
 
-            ctx.exit_interpret.store(Rc::new(
-                ctx.next
-                    .clone()
-                    .unwrap_or_else(|| ctx.dictionary.make_nop()),
-            ));
+            ctx.exit_interpret
+                .store(Rc::new(ctx.next.clone().unwrap_or_else(NopCont::instance)));
 
             ctx.next = SeqCont::make(Some(self), ctx.next.take());
             break Ok(Some(compile_exec));
@@ -203,7 +200,7 @@ impl ContImpl for ListCont {
     fn run(mut self: Rc<Self>, ctx: &mut Context) -> Result<Option<Cont>> {
         let is_last = self.pos + 1 >= self.list.items.len();
         let Some(current) = self.list.items.get(self.pos).cloned() else {
-            return Ok(ctx.next.take())
+            return Ok(ctx.next.take());
         };
 
         match Rc::get_mut(&mut self) {
@@ -278,6 +275,34 @@ impl ContImpl for ListCont {
             }
             Ok(())
         }
+    }
+}
+
+pub struct NopCont;
+
+impl NopCont {
+    thread_local! {
+        static INSTANCE: Cont = Rc::new(NopCont);
+    }
+
+    pub fn instance() -> Cont {
+        Self::INSTANCE.with(|c| c.clone())
+    }
+
+    pub fn is_nop(cont: &dyn ContImpl) -> bool {
+        let left = Self::INSTANCE.with(|c| Rc::as_ptr(c) as *const ());
+        let right = cont as *const _ as *const ();
+        std::ptr::eq(left, right)
+    }
+}
+
+impl ContImpl for NopCont {
+    fn run(self: Rc<Self>, _: &mut crate::Context) -> Result<Option<Cont>> {
+        Ok(None)
+    }
+
+    fn fmt_name(&self, _: &Dictionary, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("<nop>")
     }
 }
 

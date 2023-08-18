@@ -109,7 +109,7 @@ impl<'a> Context<'a> {
             let word_list = Rc::make_mut(&mut word_list);
             word_list.items.extend(cont);
 
-            if !self.dictionary.is_nop(&**word_def) {
+            if !cont::NopCont::is_nop(&**word_def) {
                 word_list.items.push(Rc::clone(&word_def));
             }
         }

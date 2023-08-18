@@ -12,12 +12,11 @@ impl Control {
     #[init]
     fn init(&self, d: &mut Dictionary) -> Result<()> {
         d.define_word(
-            "'exit-interpret ",
-            DictionaryEntry {
-                definition: Rc::new(ExitInterpretCont),
-                active: false,
-            },
-        )
+            "Fift-wordlist ",
+            Rc::new(cont::LitCont(d.get_words_box().clone())),
+        )?;
+
+        d.define_word("'exit-interpret ", Rc::new(ExitInterpretCont))
     }
 
     // === Execution control ===
@@ -116,27 +115,27 @@ impl Control {
     #[cmd(name = "[", active)]
     fn interpret_internal_interpret_begin(ctx: &mut Context) -> Result<()> {
         ctx.state.begin_interpret_internal()?;
-        ctx.stack.push_argcount(0, ctx.dictionary.make_nop())
+        ctx.stack.push_argcount(0, cont::NopCont::instance())
     }
 
     #[cmd(name = "]", active)]
     fn interpret_internal_interpret_end(ctx: &mut Context) -> Result<()> {
         ctx.state.end_interpret_internal()?;
-        ctx.stack.push(ctx.dictionary.make_nop())
+        ctx.stack.push(cont::NopCont::instance())
     }
 
     #[cmd(name = "{", active)]
     fn interpret_wordlist_begin(ctx: &mut Context) -> Result<()> {
         ctx.state.begin_compile()?;
         interpret_wordlist_begin_aux(&mut ctx.stack)?;
-        ctx.stack.push_argcount(0, ctx.dictionary.make_nop())
+        ctx.stack.push_argcount(0, cont::NopCont::instance())
     }
 
     #[cmd(name = "}", active)]
     fn interpret_wordlist_end(ctx: &mut Context) -> Result<()> {
         ctx.state.end_compile()?;
         interpret_wordlist_end_aux(ctx)?;
-        ctx.stack.push_argcount(1, ctx.dictionary.make_nop())
+        ctx.stack.push_argcount(1, cont::NopCont::instance())
     }
 
     #[cmd(name = "({)", stack)]
@@ -175,12 +174,12 @@ impl Control {
             }
         };
         ctx.stack.push(entry.definition.clone())?;
-        ctx.stack.push_argcount(1, ctx.dictionary.make_nop())
+        ctx.stack.push_argcount(1, cont::NopCont::instance())
     }
 
     #[cmd(name = "'nop")]
     fn interpret_tick_nop(ctx: &mut Context) -> Result<()> {
-        ctx.stack.push(ctx.dictionary.make_nop())
+        ctx.stack.push(cont::NopCont::instance())
     }
 
     // === Dictionary manipulation ===
@@ -274,6 +273,18 @@ impl Control {
         }
 
         ctx.dictionary.undefine_word(&word)?;
+        Ok(())
+    }
+
+    #[cmd(name = "current@")]
+    fn interpret_get_current(ctx: &mut Context) -> Result<()> {
+        ctx.stack.push_raw(ctx.dictionary.get_words_box().clone())
+    }
+
+    #[cmd(name = "current!")]
+    fn interpret_set_current(ctx: &mut Context) -> Result<()> {
+        let words = ctx.stack.pop_shared_box()?;
+        ctx.dictionary.set_words_box(words);
         Ok(())
     }
 

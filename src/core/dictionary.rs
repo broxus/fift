@@ -63,48 +63,17 @@ impl From<DictionaryEntry> for Rc<dyn StackValue> {
     }
 }
 
+#[derive(Default, Clone)]
 pub struct Dictionary {
     words: Rc<SharedBox>,
-    nop: Cont,
-}
-
-impl Default for Dictionary {
-    fn default() -> Self {
-        struct NopCont;
-
-        impl ContImpl for NopCont {
-            fn run(self: Rc<Self>, _: &mut crate::Context) -> Result<Option<Cont>> {
-                Ok(None)
-            }
-
-            fn fmt_name(
-                &self,
-                _: &Dictionary,
-                f: &mut std::fmt::Formatter<'_>,
-            ) -> std::fmt::Result {
-                f.write_str("<nop>")
-            }
-        }
-
-        Self {
-            words: Default::default(),
-            nop: Rc::new(NopCont),
-        }
-    }
 }
 
 impl Dictionary {
-    pub fn make_nop(&self) -> Cont {
-        self.nop.clone()
+    pub fn set_words_box(&mut self, words: Rc<SharedBox>) {
+        self.words = words;
     }
 
-    pub fn is_nop(&self, cont: &dyn ContImpl) -> bool {
-        let left = Rc::as_ptr(&self.nop) as *const ();
-        let right = cont as *const _ as *const ();
-        std::ptr::eq(left, right)
-    }
-
-    pub fn words_box(&self) -> &Rc<SharedBox> {
+    pub fn get_words_box(&self) -> &Rc<SharedBox> {
         &self.words
     }
 

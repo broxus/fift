@@ -30,7 +30,7 @@ pub struct BaseModule;
 impl FiftModule for BaseModule {
     #[init]
     fn init(&self, d: &mut Dictionary) -> Result<()> {
-        d.define_word("nop", d.make_nop())
+        d.define_word("nop", cont::NopCont::instance())
     }
 
     #[cmd(name = "null", stack)]
