@@ -16,18 +16,18 @@ impl StringUtils {
     #[cmd(name = "\"", active, without_space)]
     fn interpret_quote_str(ctx: &mut Context) -> Result<()> {
         let word = ctx.input.scan_until('"')?;
-        ctx.stack.push(word.data.to_owned())?;
-        ctx.stack.push_argcount(1, ctx.dictionary.make_nop())
+        ctx.stack.push(word.to_owned())?;
+        ctx.stack.push_argcount(1)
     }
 
     #[cmd(name = "char", active)]
     fn interpret_char(ctx: &mut Context) -> Result<()> {
         let token = ctx.input.scan_word()?.ok_or(UnexpectedEof)?;
-        let mut chars = token.data.chars();
+        let mut chars = token.chars();
         let char = chars.next().ok_or(UnexpectedEof)?;
         anyhow::ensure!(chars.next().is_none(), "Expected exactly one character");
         ctx.stack.push_int(char as u32)?;
-        ctx.stack.push_argcount(1, ctx.dictionary.make_nop())
+        ctx.stack.push_argcount(1)
     }
 
     #[cmd(name = "(char)", stack)]

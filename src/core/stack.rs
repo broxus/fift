@@ -7,6 +7,7 @@ use dyn_clone::DynClone;
 use everscale_types::prelude::*;
 use num_bigint::BigInt;
 use num_traits::{One, ToPrimitive, Zero};
+use rand::Rng;
 
 use super::cont::*;
 use crate::util::DisplaySliceExt;
@@ -18,6 +19,13 @@ pub struct Stack {
 }
 
 impl Stack {
+    pub fn make_null() -> Rc<dyn StackValue> {
+        thread_local! {
+            static NULL: Rc<dyn StackValue> = Rc::new(());
+        }
+        NULL.with(|v| v.clone())
+    }
+
     pub fn new(capacity: Option<usize>) -> Self {
         Self {
             items: Default::default(),
@@ -75,6 +83,10 @@ impl Stack {
         Ok(())
     }
 
+    pub fn push_null(&mut self) -> Result<()> {
+        self.push_raw(Self::make_null())
+    }
+
     pub fn push_bool(&mut self, value: bool) -> Result<()> {
         self.push(if value {
             -BigInt::one()
@@ -83,13 +95,27 @@ impl Stack {
         })
     }
 
+    pub fn push_opt<T: StackValue + 'static>(&mut self, value: Option<T>) -> Result<()> {
+        match value {
+            None => self.push_null(),
+            Some(value) => self.push(value),
+        }
+    }
+
+    pub fn push_opt_raw<T: StackValue + 'static>(&mut self, value: Option<Rc<T>>) -> Result<()> {
+        match value {
+            None => self.push_null(),
+            Some(value) => self.push_raw(value),
+        }
+    }
+
     pub fn push_int<T: Into<BigInt>>(&mut self, value: T) -> Result<()> {
         self.push(value.into())
     }
 
-    pub fn push_argcount(&mut self, args: u32, cont: Cont) -> Result<()> {
+    pub fn push_argcount(&mut self, args: u32) -> Result<()> {
         self.push_int(args)?;
-        self.push(cont)
+        self.push_raw(NopCont::value_instance())
     }
 
     pub fn pop(&mut self) -> Result<Rc<dyn StackValue>> {
@@ -191,6 +217,13 @@ impl Stack {
         self.pop()?.into_cont()
     }
 
+    pub fn pop_cont_owned(&mut self) -> Result<Cont> {
+        Ok(match Rc::try_unwrap(self.pop()?.into_cont()?) {
+            Ok(inner) => inner,
+            Err(rc) => rc.as_ref().clone(),
+        })
+    }
+
     pub fn pop_word_list(&mut self) -> Result<Rc<WordList>> {
         self.pop()?.into_word_list()
     }
@@ -212,6 +245,15 @@ impl Stack {
 
     pub fn pop_atom(&mut self) -> Result<Rc<Atom>> {
         self.pop()?.into_atom()
+    }
+
+    pub fn pop_hashmap(&mut self) -> Result<Option<Rc<HashMapTreeNode>>> {
+        let value = self.pop()?;
+        if value.is_null() {
+            Ok(None)
+        } else {
+            value.into_hashmap().map(Some)
+        }
     }
 
     pub fn items(&self) -> &[Rc<dyn StackValue>] {
@@ -271,7 +313,7 @@ macro_rules! define_stack_value {
             $({ $($other:tt)* })?
         }
     ),*$(,)?}) => {
-        #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
+        #[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
         pub enum $value_type {
             $($name),*,
         }
@@ -390,7 +432,7 @@ define_stack_value! {
                 if v.is_empty() {
                     return f.write_str("[]");
                 }
-                f.write_str("[")?;
+                f.write_str("[ ")?;
                 let mut first = true;
                 for item in v {
                     if !std::mem::take(&mut first) {
@@ -398,7 +440,7 @@ define_stack_value! {
                     }
                     StackValue::fmt_dump(item.as_ref(), f)?;
                 }
-                f.write_str("]")
+                f.write_str(" ]")
             },
             as_tuple(v): &StackTuple = Ok(v),
             into_tuple,
@@ -425,11 +467,7 @@ define_stack_value! {
             }
         },
         SharedBox(SharedBox) = {
-            eq(a, b) = {
-                let a = Rc::as_ptr(&a.value) as *const ();
-                let b = Rc::as_ptr(&b.value) as *const ();
-                std::ptr::eq(a, b)
-            },
+            eq(a, b) = a == b,
             fmt_dump(v, f) = write!(f, "Box{{{:?}}}", Rc::as_ptr(&v.value)),
             as_box(v): &SharedBox = Ok(v),
             into_shared_box,
@@ -439,6 +477,12 @@ define_stack_value! {
             fmt_dump(v, f) = std::fmt::Display::fmt(v, f),
             as_atom(v): &Atom = Ok(v),
             into_atom,
+        },
+        HashMap(HashMapTreeNode) = {
+            eq(a, b) = a == b,
+            fmt_dump(v, f) = write!(f, "HashMap{{{:?}}}", &v as *const _),
+            as_hashmap(v): &HashMapTreeNode = Ok(v),
+            into_hashmap,
         }
     }
 }
@@ -630,7 +674,16 @@ pub struct SharedBox {
 
 impl Default for SharedBox {
     fn default() -> Self {
-        Self::new(Rc::new(()))
+        Self::new(Stack::make_null())
+    }
+}
+
+impl Eq for SharedBox {}
+impl PartialEq for SharedBox {
+    fn eq(&self, other: &Self) -> bool {
+        let a = Rc::as_ptr(&self.value) as *const ();
+        let b = Rc::as_ptr(&other.value) as *const ();
+        std::ptr::eq(a, b)
     }
 }
 
@@ -645,12 +698,27 @@ impl SharedBox {
         *self.value.borrow_mut() = value;
     }
 
+    pub fn store_opt<T: StackValue + 'static>(&self, value: Option<Rc<T>>) {
+        *self.value.borrow_mut() = match value {
+            None => Stack::make_null(),
+            Some(value) => value,
+        };
+    }
+
     pub fn fetch(&self) -> Rc<dyn StackValue> {
         self.value.borrow().clone()
     }
+
+    pub fn take(&self) -> Rc<dyn StackValue> {
+        std::mem::replace(&mut *self.value.borrow_mut(), Stack::make_null())
+    }
+
+    pub fn borrow(&self) -> std::cell::Ref<'_, Rc<dyn StackValue>> {
+        self.value.borrow()
+    }
 }
 
-#[derive(Clone, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
 pub enum Atom {
     Unnamed(i32),
     Named(Rc<str>),
@@ -704,6 +772,495 @@ impl Atoms {
 
     pub fn get<T: AsRef<str>>(&self, name: T) -> Option<Atom> {
         self.named.get(name.as_ref()).cloned()
+    }
+}
+
+#[derive(Clone)]
+pub struct HashMapTreeNode {
+    pub key: HashMapTreeKey,
+    pub value: Rc<dyn StackValue>,
+    pub left: Option<Rc<HashMapTreeNode>>,
+    pub right: Option<Rc<HashMapTreeNode>>,
+    pub rand_offset: u64,
+}
+
+impl Eq for HashMapTreeNode {}
+impl PartialEq for HashMapTreeNode {
+    fn eq(&self, other: &Self) -> bool {
+        self.key == other.key && self.value.is_equal(other.value.as_ref())
+    }
+}
+
+impl HashMapTreeNode {
+    pub fn new(key: HashMapTreeKey, value: Rc<dyn StackValue>) -> Self {
+        Self {
+            key,
+            value,
+            left: None,
+            right: None,
+            rand_offset: rand::thread_rng().gen(),
+        }
+    }
+
+    pub fn iter(&self) -> HashMapTreeIter<'_> {
+        self.into_iter()
+    }
+
+    pub fn owned_iter(self: Rc<Self>) -> HashMapTreeOwnedIter {
+        HashMapTreeOwnedIter {
+            stack: vec![(self, None)],
+        }
+    }
+
+    pub fn lookup<K>(root_opt: &Option<Rc<Self>>, key: K) -> Option<&'_ Rc<HashMapTreeNode>>
+    where
+        K: AsHashMapTreeKeyRef,
+    {
+        Self::lookup_internal(root_opt, &key.as_equivalent())
+    }
+
+    pub fn set(root_opt: &mut Option<Rc<Self>>, key: &HashMapTreeKey, value: &Rc<dyn StackValue>) {
+        // TODO: insert new during replace
+        if !key.stack_value.is_null()
+            && !Self::replace(root_opt, key.as_equivalent(), value)
+            && !value.is_null()
+        {
+            Self::insert_internal(root_opt, key, value, rand::thread_rng().gen())
+        }
+    }
+
+    pub fn replace<K>(root_opt: &mut Option<Rc<Self>>, key: K, value: &Rc<dyn StackValue>) -> bool
+    where
+        K: AsHashMapTreeKeyRef,
+    {
+        let key = key.as_equivalent();
+        if key.stack_value.is_null() {
+            false
+        } else if value.is_null() {
+            Self::remove_internal(root_opt, &key).is_some()
+        } else if let Some(root) = root_opt {
+            root.replace_internal(&key, value)
+        } else {
+            false
+        }
+    }
+
+    pub fn remove<K>(root_opt: &mut Option<Rc<Self>>, key: K) -> Option<Rc<dyn StackValue>>
+    where
+        K: AsHashMapTreeKeyRef,
+    {
+        let key = key.as_equivalent();
+        if key.stack_value.is_null() {
+            None
+        } else {
+            match Self::remove_internal(root_opt, &key) {
+                Some(value) if !value.is_null() => Some(value),
+                _ => None,
+            }
+        }
+    }
+
+    pub fn lookup_internal<'a>(
+        root_opt: &'a Option<Rc<Self>>,
+        key: &HashMapTreeKeyRef<'_>,
+    ) -> Option<&'a Rc<HashMapTreeNode>> {
+        let mut root = root_opt.as_ref()?;
+        loop {
+            root = match key.cmp_owned(&root.key) {
+                std::cmp::Ordering::Equal => return Some(root),
+                std::cmp::Ordering::Less => root.left.as_ref()?,
+                std::cmp::Ordering::Greater => root.right.as_ref()?,
+            };
+        }
+    }
+
+    fn insert_internal(
+        root_opt: &mut Option<Rc<Self>>,
+        key: &HashMapTreeKey,
+        value: &Rc<dyn StackValue>,
+        rand_offset: u64,
+    ) {
+        let Some(mut root) = root_opt.take() else {
+            *root_opt = Some(Rc::new(Self {
+                key: key.clone(),
+                value: value.clone(),
+                left: None,
+                right: None,
+                rand_offset,
+            }));
+            return;
+        };
+
+        *root_opt = Some(if root.rand_offset <= rand_offset {
+            let (left, right) = root.split_internal(key);
+            Rc::new(Self {
+                key: key.clone(),
+                value: value.clone(),
+                left,
+                right,
+                rand_offset,
+            })
+        } else {
+            let this = Rc::make_mut(&mut root);
+            let branch = if key < &this.key {
+                &mut this.left
+            } else {
+                &mut this.right
+            };
+            Self::insert_internal(branch, key, value, rand_offset);
+            root
+        });
+    }
+
+    fn replace_internal(
+        self: &mut Rc<Self>,
+        key: &HashMapTreeKeyRef<'_>,
+        value: &Rc<dyn StackValue>,
+    ) -> bool {
+        fn replace_internal_impl(
+            root: &mut Rc<HashMapTreeNode>,
+            key: &HashMapTreeKeyRef<'_>,
+            value: &Rc<dyn StackValue>,
+        ) -> Option<()> {
+            match key.cmp_owned(&root.key) {
+                std::cmp::Ordering::Equal => {
+                    let this = Rc::make_mut(root);
+                    this.value = value.clone();
+                }
+                std::cmp::Ordering::Less => match Rc::get_mut(root) {
+                    Some(this) => replace_internal_impl(this.left.as_mut()?, key, value)?,
+                    None => {
+                        let mut left = root.left.clone()?;
+                        replace_internal_impl(&mut left, key, value)?;
+                        Rc::make_mut(root).left = Some(left);
+                    }
+                },
+                std::cmp::Ordering::Greater => match Rc::get_mut(root) {
+                    Some(this) => replace_internal_impl(this.right.as_mut()?, key, value)?,
+                    None => {
+                        let mut right = root.right.clone()?;
+                        replace_internal_impl(&mut right, key, value)?;
+                        Rc::make_mut(root).right = Some(right);
+                    }
+                },
+            }
+            Some(())
+        }
+
+        replace_internal_impl(self, key, value).is_some()
+    }
+
+    fn remove_internal(
+        root_opt: &mut Option<Rc<Self>>,
+        key: &HashMapTreeKeyRef<'_>,
+    ) -> Option<Rc<dyn StackValue>> {
+        let new_root = {
+            let root = root_opt.as_mut()?;
+            match key.cmp_owned(&root.key) {
+                std::cmp::Ordering::Equal => {
+                    let (left, right) = match Rc::get_mut(root) {
+                        Some(this) => (this.left.take(), this.right.take()),
+                        None => (root.left.clone(), root.right.clone()),
+                    };
+                    Self::merge_internal(left, right)
+                }
+                std::cmp::Ordering::Less => {
+                    return Some(match Rc::get_mut(root) {
+                        Some(this) => Self::remove_internal(&mut this.left, key)?,
+                        None => {
+                            let mut left = root.left.clone();
+                            let value = Self::remove_internal(&mut left, key)?;
+                            Rc::make_mut(root).left = left;
+                            value
+                        }
+                    })
+                }
+                std::cmp::Ordering::Greater => {
+                    return Some(match Rc::get_mut(root) {
+                        Some(this) => Self::remove_internal(&mut this.right, key)?,
+                        None => {
+                            let mut right = root.right.clone();
+                            let value = Self::remove_internal(&mut right, key)?;
+                            Rc::make_mut(root).right = right;
+                            value
+                        }
+                    })
+                }
+            }
+        };
+
+        let value = match Rc::try_unwrap(root_opt.take().unwrap()) {
+            Ok(this) => this.value,
+            Err(this) => this.value.clone(),
+        };
+        *root_opt = new_root;
+        Some(value)
+    }
+
+    fn merge_internal(left: Option<Rc<Self>>, right: Option<Rc<Self>>) -> Option<Rc<Self>> {
+        match (left, right) {
+            (None, right) => right,
+            (left, None) => left,
+            (Some(mut left), Some(mut right)) => {
+                if left.rand_offset > right.rand_offset {
+                    let left_ref = Rc::make_mut(&mut left);
+                    left_ref.right = Self::merge_internal(left_ref.right.take(), Some(right));
+                    Some(left)
+                } else {
+                    let right_ref = Rc::make_mut(&mut right);
+                    right_ref.left = Self::merge_internal(Some(left), right_ref.left.take());
+                    Some(right)
+                }
+            }
+        }
+    }
+
+    fn split_internal(
+        mut self: Rc<Self>,
+        key: &HashMapTreeKey,
+    ) -> (Option<Rc<Self>>, Option<Rc<Self>>) {
+        match key.cmp(&self.key) {
+            std::cmp::Ordering::Less => {
+                let Some(left) = (match Rc::get_mut(&mut self) {
+                    Some(this) => this.left.take(),
+                    None => self.left.clone(),
+                }) else {
+                    return (None, Some(self));
+                };
+
+                let (left, right) = Self::split_internal(left, key);
+                Rc::make_mut(&mut self).left = right;
+                (left, Some(self))
+            }
+            _ => {
+                let Some(right) = (match Rc::get_mut(&mut self) {
+                    Some(this) => this.right.take(),
+                    None => self.right.clone(),
+                }) else {
+                    return (Some(self), None);
+                };
+
+                let (left, right) = Self::split_internal(right, key);
+                Rc::make_mut(&mut self).right = left;
+                (Some(self), right)
+            }
+        }
+    }
+}
+
+impl<'a> IntoIterator for &'a HashMapTreeNode {
+    type IntoIter = HashMapTreeIter<'a>;
+    type Item = &'a HashMapTreeNode;
+
+    fn into_iter(self) -> Self::IntoIter {
+        HashMapTreeIter {
+            stack: vec![(self, None)],
+        }
+    }
+}
+
+pub struct HashMapTreeIter<'a> {
+    stack: Vec<(&'a HashMapTreeNode, Option<bool>)>,
+}
+
+impl<'a> Iterator for HashMapTreeIter<'a> {
+    type Item = &'a HashMapTreeNode;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        Some(loop {
+            match self.stack.last_mut()? {
+                (node, pos @ None) => {
+                    *pos = Some(false);
+                    break *node;
+                }
+                (node, pos @ Some(false)) => {
+                    *pos = Some(true);
+                    if let Some(next) = node.left.as_deref() {
+                        self.stack.push((next, None))
+                    }
+                }
+                (node, pos @ Some(true)) => {
+                    if let Some(next) = node.right.as_deref() {
+                        *node = next;
+                        *pos = None;
+                    } else {
+                        self.stack.pop();
+                    }
+                }
+            };
+        })
+    }
+}
+
+#[derive(Default, Clone)]
+pub struct HashMapTreeOwnedIter {
+    stack: Vec<(Rc<HashMapTreeNode>, Option<bool>)>,
+}
+
+impl Iterator for HashMapTreeOwnedIter {
+    type Item = Rc<HashMapTreeNode>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        Some(loop {
+            match self.stack.last_mut()? {
+                (node, pos @ None) => {
+                    *pos = Some(false);
+                    break node.clone();
+                }
+                (node, pos @ Some(false)) => {
+                    *pos = Some(true);
+                    if let Some(next) = node.left.clone() {
+                        self.stack.push((next, None))
+                    }
+                }
+                (node, pos @ Some(true)) => {
+                    if let Some(next) = node.right.clone() {
+                        *node = next;
+                        *pos = None;
+                    } else {
+                        self.stack.pop();
+                    }
+                }
+            };
+        })
+    }
+}
+
+pub trait AsHashMapTreeKeyRef {
+    fn as_equivalent(&self) -> HashMapTreeKeyRef<'_>;
+}
+
+impl<T: AsHashMapTreeKeyRef> AsHashMapTreeKeyRef for &T {
+    #[inline]
+    fn as_equivalent(&self) -> HashMapTreeKeyRef<'_> {
+        <T as AsHashMapTreeKeyRef>::as_equivalent(self)
+    }
+}
+
+#[derive(Clone)]
+pub struct HashMapTreeKey {
+    pub hash: u64,
+    pub stack_value: Rc<dyn StackValue>,
+}
+
+impl HashMapTreeKey {
+    thread_local! {
+        static HASHER_STATE: ahash::RandomState = ahash::RandomState::new();
+    }
+
+    pub fn new(value: Rc<dyn StackValue>) -> Result<Self> {
+        let hash = Self::HASHER_STATE.with(|hasher| {
+            Ok(match value.ty() {
+                StackValueType::Null => 0,
+                StackValueType::Int => hasher.hash_one(value.as_int()?),
+                StackValueType::Atom => hasher.hash_one(value.as_atom()?),
+                StackValueType::String => hasher.hash_one(value.as_string()?),
+                StackValueType::Bytes => hasher.hash_one(value.as_bytes()?),
+                ty => anyhow::bail!("Unsupported key type: {ty:?}"),
+            })
+        })?;
+
+        Ok(Self {
+            hash,
+            stack_value: value,
+        })
+    }
+}
+
+impl From<String> for HashMapTreeKey {
+    fn from(value: String) -> Self {
+        Self {
+            hash: Self::HASHER_STATE.with(|hasher| hasher.hash_one(&value)),
+            stack_value: Rc::new(value),
+        }
+    }
+}
+
+impl AsHashMapTreeKeyRef for HashMapTreeKey {
+    fn as_equivalent(&self) -> HashMapTreeKeyRef<'_> {
+        HashMapTreeKeyRef {
+            hash: self.hash,
+            stack_value: self.stack_value.as_ref(),
+        }
+    }
+}
+
+impl Ord for HashMapTreeKey {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.as_equivalent().cmp_owned(other)
+    }
+}
+
+impl PartialOrd for HashMapTreeKey {
+    #[inline]
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Eq for HashMapTreeKey {}
+impl PartialEq for HashMapTreeKey {
+    #[inline]
+    fn eq(&self, other: &Self) -> bool {
+        self.cmp(other).is_eq()
+    }
+}
+
+#[derive(Clone, Copy)]
+pub struct HashMapTreeKeyRef<'a> {
+    hash: u64,
+    stack_value: &'a dyn StackValue,
+}
+
+impl AsHashMapTreeKeyRef for HashMapTreeKeyRef<'_> {
+    fn as_equivalent(&self) -> HashMapTreeKeyRef<'_> {
+        *self
+    }
+}
+
+impl<'a> From<&'a String> for HashMapTreeKeyRef<'a> {
+    fn from(stack_value: &'a String) -> Self {
+        HashMapTreeKey::HASHER_STATE.with(|hasher| Self {
+            hash: hasher.hash_one(stack_value),
+            stack_value,
+        })
+    }
+}
+
+impl HashMapTreeKeyRef<'_> {
+    fn cmp_owned(&self, other: &HashMapTreeKey) -> std::cmp::Ordering {
+        match self.hash.cmp(&other.hash) {
+            std::cmp::Ordering::Equal => {}
+            ord => return ord,
+        }
+
+        let ty = self.stack_value.ty();
+        match ty.cmp(&other.stack_value.ty()) {
+            std::cmp::Ordering::Equal => {}
+            ord => return ord,
+        }
+
+        macro_rules! match_ty_cmp {
+            ($ty: ident, { $($ident:ident => $cast:ident),*$(,)? }) => {
+                match $ty {
+                    $(StackValueType::$ident => {
+                        if let (Ok(a), Ok(b)) = (self.stack_value.$cast(), other.stack_value.$cast()) {
+                            return a.cmp(b);
+                        }
+                    })*
+                    _ => {}
+                }
+            };
+        }
+
+        match_ty_cmp!(ty, {
+            Int => as_int,
+            Atom => as_atom,
+            String => as_string,
+            Bytes => as_bytes,
+        });
+
+        std::cmp::Ordering::Equal
     }
 }
 

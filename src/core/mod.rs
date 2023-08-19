@@ -7,11 +7,12 @@ use anyhow::{Context as _, Result};
 pub use fift_proc::fift_module;
 
 pub use self::cont::{Cont, ContImpl};
-pub use self::dictionary::{Dictionary, DictionaryEntry};
+pub use self::dictionary::{Dictionaries, Dictionary, DictionaryEntry};
 pub use self::env::{Environment, SourceBlock};
-pub use self::lexer::{Lexer, Token};
+pub use self::lexer::Lexer;
 pub use self::stack::{
-    OwnedCellSlice, SharedBox, Stack, StackTuple, StackValue, StackValueType, WordList,
+    HashMapTreeKey, HashMapTreeNode, OwnedCellSlice, SharedBox, Stack, StackTuple, StackValue,
+    StackValueType, WordList,
 };
 
 pub mod cont;
@@ -25,7 +26,7 @@ pub struct Context<'a> {
     pub stack: Stack,
     pub exit_code: u8,
     pub next: Option<Cont>,
-    pub dictionary: Dictionary,
+    pub dicts: Dictionaries,
 
     pub input: Lexer,
     pub exit_interpret: SharedBox,
@@ -41,7 +42,7 @@ impl<'a> Context<'a> {
             stack: Stack::new(None),
             exit_code: 0,
             next: None,
-            dictionary: Default::default(),
+            dicts: Default::default(),
             input: Default::default(),
             exit_interpret: Default::default(),
             env,
@@ -55,7 +56,7 @@ impl<'a> Context<'a> {
     }
 
     pub fn add_module<T: Module>(&mut self, module: T) -> Result<()> {
-        module.init(&mut self.dictionary)
+        module.init(&mut self.dicts.current)
     }
 
     pub fn with_source_block(mut self, block: SourceBlock) -> Self {
@@ -70,7 +71,6 @@ impl<'a> Context<'a> {
     pub fn run(&mut self) -> Result<u8> {
         let mut current = Some(Rc::new(cont::InterpreterCont) as Cont);
         while let Some(cont) = current.take() {
-            //eprintln!("   >>> {}", cont.display_name(&self.dictionary));
             current = cont.run(self)?;
             if current.is_none() {
                 current = self.next.take();
@@ -109,7 +109,7 @@ impl<'a> Context<'a> {
             let word_list = Rc::make_mut(&mut word_list);
             word_list.items.extend(cont);
 
-            if !self.dictionary.is_nop(&**word_def) {
+            if !cont::NopCont::is_nop(&**word_def) {
                 word_list.items.push(Rc::clone(&word_def));
             }
         }

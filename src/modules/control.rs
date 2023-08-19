@@ -11,13 +11,18 @@ pub struct Control;
 impl Control {
     #[init]
     fn init(&self, d: &mut Dictionary) -> Result<()> {
+        d.define_word("'exit-interpret ", Rc::new(ExitInterpretCont))?;
+
         d.define_word(
-            "'exit-interpret ",
-            DictionaryEntry {
-                definition: Rc::new(ExitInterpretCont),
-                active: false,
-            },
-        )
+            "Fift-wordlist ",
+            Rc::new(cont::LitCont(d.get_words_box().clone())),
+        )?;
+        d.define_word(
+            "Fift ",
+            Rc::new(ResetContextCont(d.get_words_box().clone())),
+        )?;
+
+        Ok(())
     }
 
     // === Execution control ===
@@ -34,7 +39,7 @@ impl Control {
         if let Some(next) = ctx.next.take() {
             ctx.stack.push(next)?;
         } else {
-            ctx.stack.push(())?;
+            ctx.stack.push_null()?;
         }
         Ok(Some(next.as_ref().clone()))
     }
@@ -42,7 +47,7 @@ impl Control {
     #[cmd(name = "times", tail)]
     fn interpret_execute_times(ctx: &mut Context) -> Result<Option<Cont>> {
         let count = ctx.stack.pop_smallint_range(0, 1000000000)? as usize;
-        let body = ctx.stack.pop_cont()?.as_ref().clone();
+        let body = ctx.stack.pop_cont_owned()?;
         Ok(match count {
             0 => None,
             1 => Some(body),
@@ -90,8 +95,8 @@ impl Control {
 
     #[cmd(name = "while", tail)]
     fn interpret_while(ctx: &mut Context) -> Result<Option<Cont>> {
-        let body = ctx.stack.pop_cont()?.as_ref().clone();
-        let cond = ctx.stack.pop_cont()?.as_ref().clone();
+        let body = ctx.stack.pop_cont_owned()?;
+        let cond = ctx.stack.pop_cont_owned()?;
         ctx.next = Some(Rc::new(cont::WhileCont {
             condition: Some(cond.clone()),
             body: Some(body),
@@ -103,7 +108,7 @@ impl Control {
 
     #[cmd(name = "until", tail)]
     fn interpret_until(ctx: &mut Context) -> Result<Option<Cont>> {
-        let body = ctx.stack.pop_cont()?.as_ref().clone();
+        let body = ctx.stack.pop_cont_owned()?;
         ctx.next = Some(Rc::new(cont::UntilCont {
             body: Some(body.clone()),
             after: ctx.next.take(),
@@ -116,27 +121,27 @@ impl Control {
     #[cmd(name = "[", active)]
     fn interpret_internal_interpret_begin(ctx: &mut Context) -> Result<()> {
         ctx.state.begin_interpret_internal()?;
-        ctx.stack.push_argcount(0, ctx.dictionary.make_nop())
+        ctx.stack.push_argcount(0)
     }
 
     #[cmd(name = "]", active)]
     fn interpret_internal_interpret_end(ctx: &mut Context) -> Result<()> {
         ctx.state.end_interpret_internal()?;
-        ctx.stack.push(ctx.dictionary.make_nop())
+        ctx.stack.push_raw(cont::NopCont::value_instance())
     }
 
     #[cmd(name = "{", active)]
     fn interpret_wordlist_begin(ctx: &mut Context) -> Result<()> {
         ctx.state.begin_compile()?;
         interpret_wordlist_begin_aux(&mut ctx.stack)?;
-        ctx.stack.push_argcount(0, ctx.dictionary.make_nop())
+        ctx.stack.push_argcount(0)
     }
 
     #[cmd(name = "}", active)]
     fn interpret_wordlist_end(ctx: &mut Context) -> Result<()> {
         ctx.state.end_compile()?;
         interpret_wordlist_end_aux(ctx)?;
-        ctx.stack.push_argcount(1, ctx.dictionary.make_nop())
+        ctx.stack.push_argcount(1)
     }
 
     #[cmd(name = "({)", stack)]
@@ -163,21 +168,18 @@ impl Control {
 
     #[cmd(name = "'", active)]
     fn interpret_tick(ctx: &mut Context) -> Result<()> {
-        let word = ctx.input.scan_word()?.ok_or(UnexpectedEof)?;
-        let entry = match ctx.dictionary.lookup(word.data) {
-            Some(entry) => entry,
-            None => ctx
-                .dictionary
-                .lookup(&format!("{} ", word.data))
-                .with_context(|| format!("Undefined word `{}`", word.data))?,
-        };
+        let word = ctx.input.scan_word()?.ok_or(UnexpectedEof)?.to_owned();
+        let entry = ctx
+            .dicts
+            .lookup(&word, true)?
+            .with_context(|| format!("Undefined word `{word}`"))?;
         ctx.stack.push(entry.definition.clone())?;
-        ctx.stack.push_argcount(1, ctx.dictionary.make_nop())
+        ctx.stack.push_argcount(1)
     }
 
     #[cmd(name = "'nop")]
     fn interpret_tick_nop(ctx: &mut Context) -> Result<()> {
-        ctx.stack.push(ctx.dictionary.make_nop())
+        ctx.stack.push_raw(cont::NopCont::value_instance())
     }
 
     // === Dictionary manipulation ===
@@ -185,12 +187,7 @@ impl Control {
     #[cmd(name = "find")]
     fn interpret_find(ctx: &mut Context) -> Result<()> {
         let word = ctx.stack.pop_string()?;
-        let entry = match ctx.dictionary.lookup(&word) {
-            Some(entry) => Some(entry),
-            // TODO: split dictionaries for prefix words
-            None => ctx.dictionary.lookup(&format!("{word} ")),
-        };
-        match entry {
+        match ctx.dicts.lookup(&word, true)? {
             Some(entry) => {
                 ctx.stack.push(entry.definition.clone())?;
                 ctx.stack.push_bool(true)
@@ -203,11 +200,11 @@ impl Control {
     fn interpret_create(ctx: &mut Context) -> Result<()> {
         // NOTE: same as `:`, but not active
         let cont = ctx.stack.pop_cont()?;
-        let name = ctx.input.scan_word()?.ok_or(UnexpectedEof)?;
+        let word = ctx.input.scan_word()?.ok_or(UnexpectedEof)?.to_owned();
 
         define_word(
-            &mut ctx.dictionary,
-            name.data.to_owned(),
+            &mut ctx.dicts.current,
+            word,
             cont.as_ref().clone(),
             DefMode {
                 active: false,
@@ -229,8 +226,8 @@ impl Control {
             }
         };
         let word = ctx.stack.pop_string_owned()?;
-        let cont = ctx.stack.pop_cont()?.as_ref().clone();
-        define_word(&mut ctx.dictionary, word, cont, mode)
+        let cont = ctx.stack.pop_cont_owned()?;
+        define_word(&mut ctx.dicts.current, word, cont, mode)
     }
 
     #[cmd(name = ":", active, args(active = false, prefix = false))]
@@ -247,7 +244,7 @@ impl Control {
 
         let cont = CREATE_AUX.with(|cont| cont.clone());
 
-        ctx.stack.push(name.data.to_owned())?;
+        ctx.stack.push(name.to_owned())?;
         ctx.stack.push_int(mode)?;
         ctx.stack.push_int(2)?;
         ctx.stack.push(cont)
@@ -259,18 +256,43 @@ impl Control {
         let mut word = if word_from_stack {
             ctx.stack.pop_string_owned()?
         } else {
-            let word = ctx.input.scan_word()?.ok_or(UnexpectedEof)?;
-            word.data.to_owned()
+            ctx.input.scan_word()?.ok_or(UnexpectedEof)?.to_owned()
         };
 
-        if ctx.dictionary.lookup(&word).is_none() {
+        if ctx.dicts.current.lookup(&word)?.is_none() {
             word.push(' ');
-            if ctx.dictionary.lookup(&word).is_none() {
+            if ctx.dicts.current.lookup(&word)?.is_none() {
                 anyhow::bail!("Undefined word `{}`", word.trim());
             }
         }
 
-        ctx.dictionary.undefine_word(&word);
+        ctx.dicts.current.undefine_word(&word)?;
+        Ok(())
+    }
+
+    #[cmd(name = "current@")]
+    fn interpret_get_current(ctx: &mut Context) -> Result<()> {
+        let words = ctx.dicts.current.get_words_box().clone();
+        ctx.stack.push_raw(words)
+    }
+
+    #[cmd(name = "current!")]
+    fn interpret_set_current(ctx: &mut Context) -> Result<()> {
+        let words = ctx.stack.pop_shared_box()?;
+        ctx.dicts.current.set_words_box(words);
+        Ok(())
+    }
+
+    #[cmd(name = "context@")]
+    fn interpret_get_context(ctx: &mut Context) -> Result<()> {
+        let words = ctx.dicts.context.get_words_box().clone();
+        ctx.stack.push_raw(words)
+    }
+
+    #[cmd(name = "context!")]
+    fn interpret_set_context(ctx: &mut Context) -> Result<()> {
+        let words = ctx.stack.pop_shared_box()?;
+        ctx.dicts.context.set_words_box(words);
         Ok(())
     }
 
@@ -284,7 +306,7 @@ impl Control {
         } else {
             ctx.input.scan_until_delimiter(delim)
         }?;
-        ctx.stack.push(token.data.to_owned())
+        ctx.stack.push(token.to_owned())
     }
 
     #[cmd(name = "(word)")]
@@ -305,7 +327,7 @@ impl Control {
         }
 
         let word = ctx.input.scan_classify(&delims, mode & 0b11)?;
-        ctx.stack.push(word.data.to_owned())
+        ctx.stack.push(word.to_owned())
     }
 
     #[cmd(name = "skipspc")]
@@ -367,13 +389,12 @@ fn define_word(d: &mut Dictionary, mut word: String, cont: Cont, mode: DefMode) 
     if !mode.prefix {
         word.push(' ');
     }
-    d.define_word_ext(
+    d.define_word(
         word,
         DictionaryEntry {
             definition: cont,
             active: mode.active,
         },
-        true,
     )
 }
 
@@ -381,6 +402,19 @@ fn define_word(d: &mut Dictionary, mut word: String, cont: Cont, mode: DefMode) 
 struct DefMode {
     active: bool,
     prefix: bool,
+}
+
+struct ResetContextCont(Rc<SharedBox>);
+
+impl cont::ContImpl for ResetContextCont {
+    fn run(self: Rc<Self>, ctx: &mut Context) -> Result<Option<Cont>> {
+        ctx.dicts.context.set_words_box(self.0.clone());
+        Ok(None)
+    }
+
+    fn fmt_name(&self, _: &Dictionary, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Fift")
+    }
 }
 
 struct ExitInterpretCont;

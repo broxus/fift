@@ -96,7 +96,7 @@ impl DebugUtils {
     #[cmd(name = ".bt")]
     fn interpret_print_backtrace(ctx: &mut Context) -> Result<()> {
         if let Some(next) = &ctx.next {
-            writeln!(ctx.stdout, "{}", next.display_backtrace(&ctx.dictionary))?;
+            writeln!(ctx.stdout, "{}", next.display_backtrace(&ctx.dicts.current))?;
         }
         Ok(())
     }
@@ -104,7 +104,7 @@ impl DebugUtils {
     #[cmd(name = "cont.")]
     fn interpret_print_continuation(ctx: &mut Context) -> Result<()> {
         let cont = ctx.stack.pop_cont()?;
-        writeln!(ctx.stdout, "{}", cont.display_backtrace(&ctx.dictionary))?;
+        writeln!(ctx.stdout, "{}", cont.display_backtrace(&ctx.dicts.current))?;
         Ok(())
     }
 
@@ -147,8 +147,17 @@ impl DebugUtils {
 
     #[cmd(name = "words")]
     fn interpret_words(ctx: &mut Context) -> Result<()> {
-        let mut all_words = ctx.dictionary.words().collect::<Vec<_>>();
+        let Some(map) = ctx.dicts.current.clone_words_map()? else {
+            return Ok(());
+        };
+
+        let mut all_words = map
+            .as_ref()
+            .into_iter()
+            .map(|entry| entry.key.stack_value.as_string())
+            .collect::<Result<Vec<_>>>()?;
         all_words.sort();
+
         let mut first = true;
         for word in all_words {
             let space = if std::mem::take(&mut first) { "" } else { " " };

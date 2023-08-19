@@ -106,23 +106,27 @@ impl ContImpl for InterpreterCont {
 
                     let mut prefix_entry = None;
 
-                    // Find the largest subtoken first
-                    for subtoken in token.subtokens() {
-                        if let Some(entry) = ctx.dictionary.lookup(subtoken) {
-                            rewind = token.delta(subtoken);
-                            prefix_entry = Some(entry);
-                            break;
-                        }
-                    }
-
                     // Find in predefined entries
                     if let Some(entry) = WORD.with(|word| {
                         let mut word = word.borrow_mut();
                         word.clear();
-                        word.push_str(token.data);
+                        word.push_str(token);
+
+                        // Find the largest subtoken first
+                        while !word.is_empty() {
+                            if let Some(entry) = ctx.dicts.lookup(&word, false)? {
+                                rewind = token.len() - word.len();
+                                prefix_entry = Some(entry);
+                                break;
+                            }
+                            word.pop();
+                        }
+
+                        word.clear();
+                        word.push_str(token);
                         word.push(' ');
-                        ctx.dictionary.lookup(&word)
-                    }) {
+                        ctx.dicts.lookup(&word, false)
+                    })? {
                         rewind = 0;
                         break 'entry entry;
                     } else if let Some(entry) = prefix_entry {
@@ -130,18 +134,18 @@ impl ContImpl for InterpreterCont {
                     }
 
                     // Try parse as number
-                    if let Some(value) = ImmediateInt::try_from_str(token.data)? {
+                    if let Some(value) = ImmediateInt::try_from_str(token)? {
                         ctx.stack.push(value.num)?;
                         if let Some(denom) = value.denom {
                             ctx.stack.push(denom)?;
-                            ctx.stack.push_argcount(2, ctx.dictionary.make_nop())?;
+                            ctx.stack.push_argcount(2)?;
                         } else {
-                            ctx.stack.push_argcount(1, ctx.dictionary.make_nop())?;
+                            ctx.stack.push_argcount(1)?;
                         }
                         break 'token;
                     }
 
-                    anyhow::bail!("Undefined word `{}`", token.data);
+                    anyhow::bail!("Undefined word `{token}`");
                 };
                 ctx.input.rewind(rewind);
 
@@ -152,15 +156,15 @@ impl ContImpl for InterpreterCont {
                     );
                     return Ok(Some(entry.definition.clone()));
                 } else {
-                    ctx.stack.push_argcount(0, entry.definition.clone())?;
+                    ctx.stack.push_int(0)?;
+                    ctx.stack.push(entry.definition.clone())?;
                 }
             };
 
-            ctx.exit_interpret.store(Rc::new(
-                ctx.next
-                    .clone()
-                    .unwrap_or_else(|| ctx.dictionary.make_nop()),
-            ));
+            ctx.exit_interpret.store(match &ctx.next {
+                Some(next) => Rc::new(next.clone()),
+                None => NopCont::value_instance(),
+            });
 
             ctx.next = SeqCont::make(Some(self), ctx.next.take());
             break Ok(Some(compile_exec));
@@ -199,7 +203,7 @@ impl ContImpl for ListCont {
     fn run(mut self: Rc<Self>, ctx: &mut Context) -> Result<Option<Cont>> {
         let is_last = self.pos + 1 >= self.list.items.len();
         let Some(current) = self.list.items.get(self.pos).cloned() else {
-            return Ok(ctx.next.take())
+            return Ok(ctx.next.take());
         };
 
         match Rc::get_mut(&mut self) {
@@ -274,6 +278,42 @@ impl ContImpl for ListCont {
             }
             Ok(())
         }
+    }
+}
+
+pub struct NopCont;
+
+impl NopCont {
+    thread_local! {
+        static INSTANCE: (Cont, Rc<dyn StackValue>) = {
+            let cont = Rc::new(NopCont);
+            let value: Rc<dyn StackValue> = Rc::new(cont.clone() as Rc<dyn ContImpl>);
+            (cont, value)
+        };
+    }
+
+    pub fn instance() -> Cont {
+        Self::INSTANCE.with(|(c, _)| c.clone())
+    }
+
+    pub fn value_instance() -> Rc<dyn StackValue> {
+        Self::INSTANCE.with(|(_, v)| v.clone())
+    }
+
+    pub fn is_nop(cont: &dyn ContImpl) -> bool {
+        let left = Self::INSTANCE.with(|(c, _)| Rc::as_ptr(c) as *const ());
+        let right = cont as *const _ as *const ();
+        std::ptr::eq(left, right)
+    }
+}
+
+impl ContImpl for NopCont {
+    fn run(self: Rc<Self>, _: &mut crate::Context) -> Result<Option<Cont>> {
+        Ok(None)
+    }
+
+    fn fmt_name(&self, _: &Dictionary, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("<nop>")
     }
 }
 

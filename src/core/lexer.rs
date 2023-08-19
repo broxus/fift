@@ -34,41 +34,41 @@ impl Lexer {
         })
     }
 
-    pub fn scan_word(&mut self) -> Result<Option<Token<'_>>> {
+    pub fn scan_word(&mut self) -> Result<Option<&str>> {
         let Some(input) = self.blocks.last_mut() else {
             return Ok(None);
         };
         input.scan_word()
     }
 
-    pub fn scan_until_space_or_eof(&mut self) -> Result<Token<'_>> {
+    pub fn scan_until_space_or_eof(&mut self) -> Result<&str> {
         if let Some(input) = self.blocks.last_mut() {
             if let Some(word) = input.scan_word()? {
                 return Ok(word);
             }
         }
-        Ok(Token { data: "" })
+        Ok("")
     }
 
-    pub fn scan_until_delimiter(&mut self, delimiter: char) -> Result<Token<'_>> {
+    pub fn scan_until_delimiter(&mut self, delimiter: char) -> Result<&str> {
         if let Some(token) = self.use_last_block()?.scan_until(delimiter)? {
             Ok(token)
         } else if delimiter as u32 == 0 {
-            Ok(Token { data: "" })
+            Ok("")
         } else {
             anyhow::bail!(UnexpectedEof)
         }
     }
 
-    pub fn scan_classify(&mut self, delims: &str, space_class: u8) -> Result<Token<'_>> {
+    pub fn scan_classify(&mut self, delims: &str, space_class: u8) -> Result<&str> {
         let Some(input) = self.blocks.last_mut() else {
-            return Ok(Token { data: "" });
+            return Ok("");
         };
         let classifier = AsciiCharClassifier::with_delims(delims, space_class)?;
         input.scan_classify(&classifier)
     }
 
-    pub fn scan_until<P: Delimiter>(&mut self, p: P) -> Result<Token<'_>> {
+    pub fn scan_until<P: Delimiter>(&mut self, p: P) -> Result<&str> {
         if let Some(token) = self.use_last_block()?.scan_until(p)? {
             Ok(token)
         } else {
@@ -127,33 +127,6 @@ pub struct LexerPosition<'a> {
     pub line_number: usize,
 }
 
-pub struct Token<'a> {
-    pub data: &'a str,
-}
-
-impl Token<'_> {
-    pub fn subtokens(&self) -> Subtokens {
-        Subtokens(self.data)
-    }
-
-    pub fn delta(&self, subtoken: &str) -> usize {
-        self.data.len() - subtoken.len()
-    }
-}
-
-pub struct Subtokens<'a>(&'a str);
-
-impl<'a> Iterator for Subtokens<'a> {
-    type Item = &'a str;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        let (i, _) = self.0.char_indices().next_back()?;
-        let res = self.0;
-        self.0 = &res[..i];
-        Some(res)
-    }
-}
-
 pub trait Delimiter {
     fn delim(&mut self, c: char) -> bool;
 }
@@ -192,7 +165,7 @@ impl From<SourceBlock> for SourceBlockState {
 }
 
 impl SourceBlockState {
-    fn scan_word(&mut self) -> Result<Option<Token<'_>>> {
+    fn scan_word(&mut self) -> Result<Option<&str>> {
         loop {
             if (self.line.is_empty() || self.line_offset >= self.line.len()) && !self.read_line()? {
                 return Ok(None);
@@ -209,13 +182,11 @@ impl SourceBlockState {
                 continue;
             }
 
-            return Ok(Some(Token {
-                data: &self.line[start..end],
-            }));
+            return Ok(Some(&self.line[start..end]));
         }
     }
 
-    fn scan_until<P: Delimiter>(&mut self, mut p: P) -> Result<Option<Token<'_>>> {
+    fn scan_until<P: Delimiter>(&mut self, mut p: P) -> Result<Option<&str>> {
         if (self.line.is_empty() || self.line_offset >= self.line.len()) && !self.read_line()? {
             return Ok(None);
         }
@@ -233,17 +204,15 @@ impl SourceBlockState {
 
         Ok(if found && end >= start {
             self.skip_symbol();
-            Some(Token {
-                data: &self.line[start..end],
-            })
+            Some(&self.line[start..end])
         } else {
             None
         })
     }
 
-    fn scan_classify(&mut self, classifier: &AsciiCharClassifier) -> Result<Token<'_>> {
+    fn scan_classify(&mut self, classifier: &AsciiCharClassifier) -> Result<&str> {
         if (self.line.is_empty() || self.line_offset >= self.line.len()) && !self.read_line()? {
-            return Ok(Token { data: "" });
+            return Ok("");
         }
 
         self.skip_whitespace()?;
@@ -274,9 +243,7 @@ impl SourceBlockState {
             self.skip_symbol();
         }
 
-        Ok(Token {
-            data: &self.line[start..self.line_offset],
-        })
+        Ok(&self.line[start..self.line_offset])
     }
 
     fn rewind(&mut self, offset: usize) {
