@@ -47,7 +47,7 @@ impl Control {
     #[cmd(name = "times", tail)]
     fn interpret_execute_times(ctx: &mut Context) -> Result<Option<Cont>> {
         let count = ctx.stack.pop_smallint_range(0, 1000000000)? as usize;
-        let body = ctx.stack.pop_cont()?.as_ref().clone();
+        let body = ctx.stack.pop_cont_owned()?;
         Ok(match count {
             0 => None,
             1 => Some(body),
@@ -95,8 +95,8 @@ impl Control {
 
     #[cmd(name = "while", tail)]
     fn interpret_while(ctx: &mut Context) -> Result<Option<Cont>> {
-        let body = ctx.stack.pop_cont()?.as_ref().clone();
-        let cond = ctx.stack.pop_cont()?.as_ref().clone();
+        let body = ctx.stack.pop_cont_owned()?;
+        let cond = ctx.stack.pop_cont_owned()?;
         ctx.next = Some(Rc::new(cont::WhileCont {
             condition: Some(cond.clone()),
             body: Some(body),
@@ -108,7 +108,7 @@ impl Control {
 
     #[cmd(name = "until", tail)]
     fn interpret_until(ctx: &mut Context) -> Result<Option<Cont>> {
-        let body = ctx.stack.pop_cont()?.as_ref().clone();
+        let body = ctx.stack.pop_cont_owned()?;
         ctx.next = Some(Rc::new(cont::UntilCont {
             body: Some(body.clone()),
             after: ctx.next.take(),
@@ -226,7 +226,7 @@ impl Control {
             }
         };
         let word = ctx.stack.pop_string_owned()?;
-        let cont = ctx.stack.pop_cont()?.as_ref().clone();
+        let cont = ctx.stack.pop_cont_owned()?;
         define_word(&mut ctx.dicts.current, word, cont, mode)
     }
 

@@ -1,3 +1,4 @@
+use std::iter::Peekable;
 use std::rc::Rc;
 
 use anyhow::{Context as _, Result};
@@ -250,6 +251,107 @@ impl FiftModule for BaseModule {
         stack.push(tuple)
     }
 
+    // === Hashmaps ===
+
+    #[cmd(name = "hmapnew", stack)]
+    fn interpret_hmap_new(stack: &mut Stack) -> Result<()> {
+        stack.push_null()
+    }
+
+    #[cmd(name = "hmap@", stack, args(chk = false))]
+    #[cmd(name = "hmap@?", stack, args(chk = true))]
+    fn interpret_hmap_fetch(stack: &mut Stack, chk: bool) -> Result<()> {
+        let map = stack.pop_hashmap()?;
+        let key = HashMapTreeKey::new(stack.pop()?)?;
+        let value = HashMapTreeNode::lookup(&map, key).map(|node| node.value.clone());
+
+        let found = value.is_some();
+        match value {
+            Some(value) => stack.push_raw(value)?,
+            None if !chk => stack.push_null()?,
+            _ => {}
+        }
+        if chk {
+            stack.push_bool(found)?;
+        }
+        Ok(())
+    }
+
+    #[cmd(name = "hmap-", stack, args(chk = false, read = false))]
+    #[cmd(name = "hmap-?", stack, args(chk = true, read = false))]
+    #[cmd(name = "hmap@-", stack, args(chk = false, read = true))]
+    fn interpret_hmap_delete(stack: &mut Stack, chk: bool, read: bool) -> Result<()> {
+        let mut map = stack.pop_hashmap()?;
+        let key = HashMapTreeKey::new(stack.pop()?)?;
+        let value = HashMapTreeNode::remove(&mut map, key);
+        stack.push_opt_raw(map)?;
+
+        let exists = value.is_some();
+        match value {
+            Some(value) if read => stack.push_raw(value)?,
+            None if read && !chk => stack.push_null()?,
+            _ => {}
+        }
+        if chk {
+            stack.push_bool(exists)?;
+        }
+        Ok(())
+    }
+
+    #[cmd(name = "hmap!", stack, args(add = false))]
+    #[cmd(name = "hmap!+", stack, args(add = true))]
+    fn interpret_hmap_store(stack: &mut Stack, add: bool) -> Result<()> {
+        let mut map = stack.pop_hashmap()?;
+        let key = HashMapTreeKey::new(stack.pop()?)?;
+        let value = stack.pop()?;
+
+        if add {
+            HashMapTreeNode::set(&mut map, &key, &value);
+        } else {
+            HashMapTreeNode::replace(&mut map, key, &value);
+        }
+        stack.push_opt_raw(map)
+    }
+
+    #[cmd(name = "hmapempty?", stack)]
+    fn interpret_hmap_is_empty(stack: &mut Stack) -> Result<()> {
+        let map = stack.pop_hashmap()?;
+        stack.push_bool(map.is_none())
+    }
+
+    #[cmd(name = "hmapunpack", stack)]
+    fn interpret_hmap_decompose(stack: &mut Stack) -> Result<()> {
+        let map = stack.pop_hashmap()?;
+        let not_empty = map.is_some();
+
+        if let Some(map) = map {
+            stack.push_raw(map.key.stack_value.clone())?;
+            stack.push_raw(map.value.clone())?;
+            stack.push_opt_raw(map.left.clone())?;
+            stack.push_opt_raw(map.right.clone())?;
+        }
+
+        stack.push_bool(not_empty)
+    }
+
+    #[cmd(name = "hmapforeach", tail)]
+    fn interpret_hmap_foreach(ctx: &mut Context) -> Result<Option<Cont>> {
+        let func = ctx.stack.pop_cont_owned()?;
+        let Some(map) = ctx.stack.pop_hashmap()? else {
+            return Ok(None);
+        };
+        Ok(Some(Rc::new(cont::LoopCont::new(
+            HmapIterCont {
+                iter: map.owned_iter().peekable(),
+                ok: true,
+            },
+            func,
+            ctx.next.take(),
+        ))))
+    }
+
+    // === Environment ===
+
     #[cmd(name = "now")]
     fn interpret_now(ctx: &mut Context) -> Result<()> {
         ctx.stack.push_int(ctx.env.now_ms() / 1000)
@@ -309,5 +411,34 @@ impl FiftModule for BaseModule {
         let name = ctx.stack.pop_string()?;
         let exists = ctx.env.file_exists(&name);
         ctx.stack.push_bool(exists)
+    }
+}
+
+#[derive(Clone)]
+struct HmapIterCont {
+    iter: Peekable<stack::HashMapTreeOwnedIter>,
+    ok: bool,
+}
+
+impl cont::LoopContImpl for HmapIterCont {
+    fn pre_exec(&mut self, ctx: &mut Context) -> Result<bool> {
+        let entry = match self.iter.next() {
+            Some(entry) => entry,
+            None => return Ok(false),
+        };
+
+        ctx.stack.push_raw(entry.key.stack_value.clone())?;
+        ctx.stack.push_raw(entry.value.clone())?;
+        Ok(true)
+    }
+
+    fn post_exec(&mut self, ctx: &mut Context) -> Result<bool> {
+        self.ok = ctx.stack.pop_bool()?;
+        Ok(self.ok && self.iter.peek().is_some())
+    }
+
+    fn finalize(&mut self, ctx: &mut Context) -> Result<bool> {
+        ctx.stack.push_bool(self.ok)?;
+        Ok(true)
     }
 }

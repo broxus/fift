@@ -102,7 +102,7 @@ impl Stack {
         }
     }
 
-    pub fn push_opt_raw(&mut self, value: Option<Rc<dyn StackValue>>) -> Result<()> {
+    pub fn push_opt_raw<T: StackValue + 'static>(&mut self, value: Option<Rc<T>>) -> Result<()> {
         match value {
             None => self.push_null(),
             Some(value) => self.push_raw(value),
@@ -217,6 +217,13 @@ impl Stack {
         self.pop()?.into_cont()
     }
 
+    pub fn pop_cont_owned(&mut self) -> Result<Cont> {
+        Ok(match Rc::try_unwrap(self.pop()?.into_cont()?) {
+            Ok(inner) => inner,
+            Err(rc) => rc.as_ref().clone(),
+        })
+    }
+
     pub fn pop_word_list(&mut self) -> Result<Rc<WordList>> {
         self.pop()?.into_word_list()
     }
@@ -240,7 +247,7 @@ impl Stack {
         self.pop()?.into_atom()
     }
 
-    pub fn pop_hashmap_owned(&mut self) -> Result<Option<Rc<HashMapTreeNode>>> {
+    pub fn pop_hashmap(&mut self) -> Result<Option<Rc<HashMapTreeNode>>> {
         let value = self.pop()?;
         if value.is_null() {
             Ok(None)
@@ -425,7 +432,7 @@ define_stack_value! {
                 if v.is_empty() {
                     return f.write_str("[]");
                 }
-                f.write_str("[")?;
+                f.write_str("[ ")?;
                 let mut first = true;
                 for item in v {
                     if !std::mem::take(&mut first) {
@@ -433,7 +440,7 @@ define_stack_value! {
                     }
                     StackValue::fmt_dump(item.as_ref(), f)?;
                 }
-                f.write_str("]")
+                f.write_str(" ]")
             },
             as_tuple(v): &StackTuple = Ok(v),
             into_tuple,
@@ -799,6 +806,12 @@ impl HashMapTreeNode {
         self.into_iter()
     }
 
+    pub fn owned_iter(self: Rc<Self>) -> HashMapTreeOwnedIter {
+        HashMapTreeOwnedIter {
+            stack: vec![(self, None)],
+        }
+    }
+
     pub fn lookup<K>(root_opt: &Option<Rc<Self>>, key: K) -> Option<&'_ Rc<HashMapTreeNode>>
     where
         K: AsHashMapTreeKeyRef,
@@ -1079,12 +1092,12 @@ impl<'a> Iterator for HashMapTreeIter<'a> {
     }
 }
 
-#[derive(Default)]
-pub struct HashMapTreeIntoIter {
+#[derive(Default, Clone)]
+pub struct HashMapTreeOwnedIter {
     stack: Vec<(Rc<HashMapTreeNode>, Option<bool>)>,
 }
 
-impl Iterator for HashMapTreeIntoIter {
+impl Iterator for HashMapTreeOwnedIter {
     type Item = Rc<HashMapTreeNode>;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -1115,6 +1128,13 @@ impl Iterator for HashMapTreeIntoIter {
 
 pub trait AsHashMapTreeKeyRef {
     fn as_equivalent(&self) -> HashMapTreeKeyRef<'_>;
+}
+
+impl<T: AsHashMapTreeKeyRef> AsHashMapTreeKeyRef for &T {
+    #[inline]
+    fn as_equivalent(&self) -> HashMapTreeKeyRef<'_> {
+        <T as AsHashMapTreeKeyRef>::as_equivalent(self)
+    }
 }
 
 #[derive(Clone)]
