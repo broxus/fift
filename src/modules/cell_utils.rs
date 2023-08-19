@@ -470,7 +470,7 @@ impl CellUtils {
     #[cmd(name = "x{", active, without_space)]
     fn interpret_bitstring_hex_literal(ctx: &mut Context) -> Result<()> {
         let s = ctx.input.scan_until('}')?;
-        let cell = decode_hex_bitstring(s.data)?.build()?;
+        let cell = decode_hex_bitstring(s)?.build()?;
         ctx.stack.push(OwnedCellSlice::new(cell))?;
         ctx.stack.push_argcount(1)
     }
@@ -478,7 +478,7 @@ impl CellUtils {
     #[cmd(name = "b{", active, without_space)]
     fn interpret_bitstring_binary_literal(ctx: &mut Context) -> Result<()> {
         let s = ctx.input.scan_until('}')?;
-        let cell = decode_binary_bitstring(s.data)?.build()?;
+        let cell = decode_binary_bitstring(s)?.build()?;
         ctx.stack.push(OwnedCellSlice::new(cell))?;
         ctx.stack.push_argcount(1)
     }

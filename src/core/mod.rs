@@ -9,7 +9,7 @@ pub use fift_proc::fift_module;
 pub use self::cont::{Cont, ContImpl};
 pub use self::dictionary::{Dictionaries, Dictionary, DictionaryEntry};
 pub use self::env::{Environment, SourceBlock};
-pub use self::lexer::{Lexer, Token};
+pub use self::lexer::Lexer;
 pub use self::stack::{
     OwnedCellSlice, SharedBox, Stack, StackTuple, StackValue, StackValueType, WordList,
 };

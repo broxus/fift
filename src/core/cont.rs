@@ -110,12 +110,12 @@ impl ContImpl for InterpreterCont {
                     if let Some(entry) = WORD.with(|word| {
                         let mut word = word.borrow_mut();
                         word.clear();
-                        word.push_str(token.data);
+                        word.push_str(token);
 
                         // Find the largest subtoken first
                         while !word.is_empty() {
                             if let Some(entry) = ctx.dicts.lookup(&word, false)? {
-                                rewind = token.delta(&word);
+                                rewind = token.len() - word.len();
                                 prefix_entry = Some(entry);
                                 break;
                             }
@@ -123,7 +123,7 @@ impl ContImpl for InterpreterCont {
                         }
 
                         word.clear();
-                        word.push_str(token.data);
+                        word.push_str(token);
                         word.push(' ');
                         ctx.dicts.lookup(&word, false)
                     })? {
@@ -134,7 +134,7 @@ impl ContImpl for InterpreterCont {
                     }
 
                     // Try parse as number
-                    if let Some(value) = ImmediateInt::try_from_str(token.data)? {
+                    if let Some(value) = ImmediateInt::try_from_str(token)? {
                         ctx.stack.push(value.num)?;
                         if let Some(denom) = value.denom {
                             ctx.stack.push(denom)?;
@@ -145,7 +145,7 @@ impl ContImpl for InterpreterCont {
                         break 'token;
                     }
 
-                    anyhow::bail!("Undefined word `{}`", token.data);
+                    anyhow::bail!("Undefined word `{token}`");
                 };
                 ctx.input.rewind(rewind);
 

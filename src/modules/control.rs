@@ -168,8 +168,7 @@ impl Control {
 
     #[cmd(name = "'", active)]
     fn interpret_tick(ctx: &mut Context) -> Result<()> {
-        let word = ctx.input.scan_word()?.ok_or(UnexpectedEof)?;
-        let word = word.data.to_owned();
+        let word = ctx.input.scan_word()?.ok_or(UnexpectedEof)?.to_owned();
         let entry = ctx
             .dicts
             .lookup(&word, true)?
@@ -201,11 +200,11 @@ impl Control {
     fn interpret_create(ctx: &mut Context) -> Result<()> {
         // NOTE: same as `:`, but not active
         let cont = ctx.stack.pop_cont()?;
-        let name = ctx.input.scan_word()?.ok_or(UnexpectedEof)?;
+        let word = ctx.input.scan_word()?.ok_or(UnexpectedEof)?.to_owned();
 
         define_word(
             &mut ctx.dicts.current,
-            name.data.to_owned(),
+            word,
             cont.as_ref().clone(),
             DefMode {
                 active: false,
@@ -245,7 +244,7 @@ impl Control {
 
         let cont = CREATE_AUX.with(|cont| cont.clone());
 
-        ctx.stack.push(name.data.to_owned())?;
+        ctx.stack.push(name.to_owned())?;
         ctx.stack.push_int(mode)?;
         ctx.stack.push_int(2)?;
         ctx.stack.push(cont)
@@ -257,8 +256,7 @@ impl Control {
         let mut word = if word_from_stack {
             ctx.stack.pop_string_owned()?
         } else {
-            let word = ctx.input.scan_word()?.ok_or(UnexpectedEof)?;
-            word.data.to_owned()
+            ctx.input.scan_word()?.ok_or(UnexpectedEof)?.to_owned()
         };
 
         if ctx.dicts.current.lookup(&word)?.is_none() {
@@ -308,7 +306,7 @@ impl Control {
         } else {
             ctx.input.scan_until_delimiter(delim)
         }?;
-        ctx.stack.push(token.data.to_owned())
+        ctx.stack.push(token.to_owned())
     }
 
     #[cmd(name = "(word)")]
@@ -329,7 +327,7 @@ impl Control {
         }
 
         let word = ctx.input.scan_classify(&delims, mode & 0b11)?;
-        ctx.stack.push(word.data.to_owned())
+        ctx.stack.push(word.to_owned())
     }
 
     #[cmd(name = "skipspc")]
