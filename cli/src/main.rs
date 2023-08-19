@@ -124,7 +124,7 @@ fn main() -> Result<ExitCode> {
             eprintln!(
                 "{}\n{}",
                 style("backtrace:").red(),
-                style(next.display_backtrace(&ctx.dictionary)).dim()
+                style(next.display_backtrace(&ctx.dicts.current)).dim()
             );
         }
 

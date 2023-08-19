@@ -460,11 +460,7 @@ define_stack_value! {
             }
         },
         SharedBox(SharedBox) = {
-            eq(a, b) = {
-                let a = Rc::as_ptr(&a.value) as *const ();
-                let b = Rc::as_ptr(&b.value) as *const ();
-                std::ptr::eq(a, b)
-            },
+            eq(a, b) = a == b,
             fmt_dump(v, f) = write!(f, "Box{{{:?}}}", Rc::as_ptr(&v.value)),
             as_box(v): &SharedBox = Ok(v),
             into_shared_box,
@@ -672,6 +668,15 @@ pub struct SharedBox {
 impl Default for SharedBox {
     fn default() -> Self {
         Self::new(Stack::make_null())
+    }
+}
+
+impl Eq for SharedBox {}
+impl PartialEq for SharedBox {
+    fn eq(&self, other: &Self) -> bool {
+        let a = Rc::as_ptr(&self.value) as *const ();
+        let b = Rc::as_ptr(&other.value) as *const ();
+        std::ptr::eq(a, b)
     }
 }
 

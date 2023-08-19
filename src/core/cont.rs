@@ -114,7 +114,7 @@ impl ContImpl for InterpreterCont {
 
                         // Find the largest subtoken first
                         while !word.is_empty() {
-                            if let Some(entry) = ctx.dictionary.lookup(&word)? {
+                            if let Some(entry) = ctx.dicts.lookup(&word, false)? {
                                 rewind = token.delta(&word);
                                 prefix_entry = Some(entry);
                                 break;
@@ -125,7 +125,7 @@ impl ContImpl for InterpreterCont {
                         word.clear();
                         word.push_str(token.data);
                         word.push(' ');
-                        ctx.dictionary.lookup(&word)
+                        ctx.dicts.lookup(&word, false)
                     })? {
                         rewind = 0;
                         break 'entry entry;

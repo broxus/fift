@@ -6,64 +6,50 @@ use super::cont::{Cont, ContImpl, ContextTailWordFunc, ContextWordFunc, StackWor
 use super::stack::{HashMapTreeKey, HashMapTreeKeyRef, HashMapTreeNode, SharedBox, StackValue};
 use super::StackValueType;
 
-pub struct DictionaryEntry {
-    pub definition: Cont,
-    pub active: bool,
+pub struct Dictionaries {
+    pub current: Dictionary,
+    pub original: Dictionary,
+    pub context: Dictionary,
 }
 
-impl DictionaryEntry {
-    fn try_from_value(value: &dyn StackValue) -> Option<Self> {
-        let (cont, active) = Self::cont_from_value(value)?;
-        Some(Self {
-            definition: cont.clone(),
-            active,
-        })
+impl Default for Dictionaries {
+    fn default() -> Self {
+        let current = Dictionary::default();
+        Self {
+            original: current.clone(),
+            context: current.clone(),
+            current,
+        }
     }
+}
 
-    fn cont_from_value(value: &dyn StackValue) -> Option<(&Cont, bool)> {
-        if let Ok(cont) = value.as_cont() {
-            return Some((cont, false));
-        } else if let Ok(tuple) = value.as_tuple() {
-            if tuple.len() == 1 {
-                if let Ok(cont) = tuple.first()?.as_cont() {
-                    return Some((cont, true));
-                }
+impl Dictionaries {
+    pub fn lookup(&self, word: &String, allow_space: bool) -> Result<Option<DictionaryEntry>> {
+        if allow_space {
+            let mut entry = self.lookup(word, false)?;
+
+            if entry.is_none() {
+                entry = self.lookup(&format!("{word} "), false)?;
             }
+
+            return Ok(entry);
         }
-        None
+
+        let mut entry = self.context.lookup(word)?;
+
+        if entry.is_none() && self.current != self.context {
+            entry = self.current.lookup(word)?;
+        }
+
+        if entry.is_none() && self.original != self.context && self.original != self.current {
+            entry = self.original.lookup(word)?;
+        }
+
+        Ok(entry)
     }
 }
 
-impl From<Cont> for DictionaryEntry {
-    fn from(value: Cont) -> Self {
-        Self {
-            definition: value,
-            active: false,
-        }
-    }
-}
-
-impl<T: ContImpl + 'static> From<Rc<T>> for DictionaryEntry {
-    fn from(value: Rc<T>) -> Self {
-        Self {
-            definition: value,
-            active: false,
-        }
-    }
-}
-
-impl From<DictionaryEntry> for Rc<dyn StackValue> {
-    fn from(value: DictionaryEntry) -> Self {
-        let cont: Rc<dyn StackValue> = Rc::new(value.definition);
-        if value.active {
-            Rc::new(vec![cont])
-        } else {
-            cont
-        }
-    }
-}
-
-#[derive(Default, Clone)]
+#[derive(Default, Clone, Eq, PartialEq)]
 pub struct Dictionary {
     words: Rc<SharedBox>,
 }
@@ -200,6 +186,63 @@ impl Dictionary {
 
         let key = HashMapTreeKeyRef::from(name);
         Ok(HashMapTreeNode::remove(&mut map, key).is_some())
+    }
+}
+
+pub struct DictionaryEntry {
+    pub definition: Cont,
+    pub active: bool,
+}
+
+impl DictionaryEntry {
+    fn try_from_value(value: &dyn StackValue) -> Option<Self> {
+        let (cont, active) = Self::cont_from_value(value)?;
+        Some(Self {
+            definition: cont.clone(),
+            active,
+        })
+    }
+
+    fn cont_from_value(value: &dyn StackValue) -> Option<(&Cont, bool)> {
+        if let Ok(cont) = value.as_cont() {
+            return Some((cont, false));
+        } else if let Ok(tuple) = value.as_tuple() {
+            if tuple.len() == 1 {
+                if let Ok(cont) = tuple.first()?.as_cont() {
+                    return Some((cont, true));
+                }
+            }
+        }
+        None
+    }
+}
+
+impl From<Cont> for DictionaryEntry {
+    fn from(value: Cont) -> Self {
+        Self {
+            definition: value,
+            active: false,
+        }
+    }
+}
+
+impl<T: ContImpl + 'static> From<Rc<T>> for DictionaryEntry {
+    fn from(value: Rc<T>) -> Self {
+        Self {
+            definition: value,
+            active: false,
+        }
+    }
+}
+
+impl From<DictionaryEntry> for Rc<dyn StackValue> {
+    fn from(value: DictionaryEntry) -> Self {
+        let cont: Rc<dyn StackValue> = Rc::new(value.definition);
+        if value.active {
+            Rc::new(vec![cont])
+        } else {
+            cont
+        }
     }
 }
 

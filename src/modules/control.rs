@@ -11,12 +11,18 @@ pub struct Control;
 impl Control {
     #[init]
     fn init(&self, d: &mut Dictionary) -> Result<()> {
+        d.define_word("'exit-interpret ", Rc::new(ExitInterpretCont))?;
+
         d.define_word(
             "Fift-wordlist ",
             Rc::new(cont::LitCont(d.get_words_box().clone())),
         )?;
+        d.define_word(
+            "Fift ",
+            Rc::new(ResetContextCont(d.get_words_box().clone())),
+        )?;
 
-        d.define_word("'exit-interpret ", Rc::new(ExitInterpretCont))
+        Ok(())
     }
 
     // === Execution control ===
@@ -163,16 +169,11 @@ impl Control {
     #[cmd(name = "'", active)]
     fn interpret_tick(ctx: &mut Context) -> Result<()> {
         let word = ctx.input.scan_word()?.ok_or(UnexpectedEof)?;
-        let mut word = word.data.to_owned();
-        let entry = match ctx.dictionary.lookup(&word)? {
-            Some(entry) => entry,
-            None => {
-                word.push(' ');
-                ctx.dictionary
-                    .lookup(&word)?
-                    .with_context(|| format!("Undefined word `{word}`"))?
-            }
-        };
+        let word = word.data.to_owned();
+        let entry = ctx
+            .dicts
+            .lookup(&word, true)?
+            .with_context(|| format!("Undefined word `{word}`"))?;
         ctx.stack.push(entry.definition.clone())?;
         ctx.stack.push_argcount(1, cont::NopCont::instance())
     }
@@ -187,12 +188,7 @@ impl Control {
     #[cmd(name = "find")]
     fn interpret_find(ctx: &mut Context) -> Result<()> {
         let word = ctx.stack.pop_string()?;
-        let entry = match ctx.dictionary.lookup(&word)? {
-            Some(entry) => Some(entry),
-            // TODO: split dictionaries for prefix words
-            None => ctx.dictionary.lookup(&format!("{word} "))?,
-        };
-        match entry {
+        match ctx.dicts.lookup(&word, true)? {
             Some(entry) => {
                 ctx.stack.push(entry.definition.clone())?;
                 ctx.stack.push_bool(true)
@@ -208,7 +204,7 @@ impl Control {
         let name = ctx.input.scan_word()?.ok_or(UnexpectedEof)?;
 
         define_word(
-            &mut ctx.dictionary,
+            &mut ctx.dicts.current,
             name.data.to_owned(),
             cont.as_ref().clone(),
             DefMode {
@@ -232,7 +228,7 @@ impl Control {
         };
         let word = ctx.stack.pop_string_owned()?;
         let cont = ctx.stack.pop_cont()?.as_ref().clone();
-        define_word(&mut ctx.dictionary, word, cont, mode)
+        define_word(&mut ctx.dicts.current, word, cont, mode)
     }
 
     #[cmd(name = ":", active, args(active = false, prefix = false))]
@@ -265,26 +261,40 @@ impl Control {
             word.data.to_owned()
         };
 
-        if ctx.dictionary.lookup(&word)?.is_none() {
+        if ctx.dicts.current.lookup(&word)?.is_none() {
             word.push(' ');
-            if ctx.dictionary.lookup(&word)?.is_none() {
+            if ctx.dicts.current.lookup(&word)?.is_none() {
                 anyhow::bail!("Undefined word `{}`", word.trim());
             }
         }
 
-        ctx.dictionary.undefine_word(&word)?;
+        ctx.dicts.current.undefine_word(&word)?;
         Ok(())
     }
 
     #[cmd(name = "current@")]
     fn interpret_get_current(ctx: &mut Context) -> Result<()> {
-        ctx.stack.push_raw(ctx.dictionary.get_words_box().clone())
+        let words = ctx.dicts.current.get_words_box().clone();
+        ctx.stack.push_raw(words)
     }
 
     #[cmd(name = "current!")]
     fn interpret_set_current(ctx: &mut Context) -> Result<()> {
         let words = ctx.stack.pop_shared_box()?;
-        ctx.dictionary.set_words_box(words);
+        ctx.dicts.current.set_words_box(words);
+        Ok(())
+    }
+
+    #[cmd(name = "context@")]
+    fn interpret_get_context(ctx: &mut Context) -> Result<()> {
+        let words = ctx.dicts.context.get_words_box().clone();
+        ctx.stack.push_raw(words)
+    }
+
+    #[cmd(name = "context!")]
+    fn interpret_set_context(ctx: &mut Context) -> Result<()> {
+        let words = ctx.stack.pop_shared_box()?;
+        ctx.dicts.context.set_words_box(words);
         Ok(())
     }
 
@@ -394,6 +404,19 @@ fn define_word(d: &mut Dictionary, mut word: String, cont: Cont, mode: DefMode) 
 struct DefMode {
     active: bool,
     prefix: bool,
+}
+
+struct ResetContextCont(Rc<SharedBox>);
+
+impl cont::ContImpl for ResetContextCont {
+    fn run(self: Rc<Self>, ctx: &mut Context) -> Result<Option<Cont>> {
+        ctx.dicts.context.set_words_box(self.0.clone());
+        Ok(None)
+    }
+
+    fn fmt_name(&self, _: &Dictionary, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Fift")
+    }
 }
 
 struct ExitInterpretCont;
