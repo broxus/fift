@@ -472,7 +472,7 @@ impl CellUtils {
         let s = ctx.input.scan_until('}')?;
         let cell = decode_hex_bitstring(s.data)?.build()?;
         ctx.stack.push(OwnedCellSlice::new(cell))?;
-        ctx.stack.push_argcount(1, cont::NopCont::instance())
+        ctx.stack.push_argcount(1)
     }
 
     #[cmd(name = "b{", active, without_space)]
@@ -480,7 +480,7 @@ impl CellUtils {
         let s = ctx.input.scan_until('}')?;
         let cell = decode_binary_bitstring(s.data)?.build()?;
         ctx.stack.push(OwnedCellSlice::new(cell))?;
-        ctx.stack.push_argcount(1, cont::NopCont::instance())
+        ctx.stack.push_argcount(1)
     }
 }
 

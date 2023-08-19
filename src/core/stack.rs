@@ -113,9 +113,9 @@ impl Stack {
         self.push(value.into())
     }
 
-    pub fn push_argcount(&mut self, args: u32, cont: Cont) -> Result<()> {
+    pub fn push_argcount(&mut self, args: u32) -> Result<()> {
         self.push_int(args)?;
-        self.push(cont)
+        self.push_raw(NopCont::value_instance())
     }
 
     pub fn pop(&mut self) -> Result<Rc<dyn StackValue>> {

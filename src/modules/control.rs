@@ -121,27 +121,27 @@ impl Control {
     #[cmd(name = "[", active)]
     fn interpret_internal_interpret_begin(ctx: &mut Context) -> Result<()> {
         ctx.state.begin_interpret_internal()?;
-        ctx.stack.push_argcount(0, cont::NopCont::instance())
+        ctx.stack.push_argcount(0)
     }
 
     #[cmd(name = "]", active)]
     fn interpret_internal_interpret_end(ctx: &mut Context) -> Result<()> {
         ctx.state.end_interpret_internal()?;
-        ctx.stack.push(cont::NopCont::instance())
+        ctx.stack.push_raw(cont::NopCont::value_instance())
     }
 
     #[cmd(name = "{", active)]
     fn interpret_wordlist_begin(ctx: &mut Context) -> Result<()> {
         ctx.state.begin_compile()?;
         interpret_wordlist_begin_aux(&mut ctx.stack)?;
-        ctx.stack.push_argcount(0, cont::NopCont::instance())
+        ctx.stack.push_argcount(0)
     }
 
     #[cmd(name = "}", active)]
     fn interpret_wordlist_end(ctx: &mut Context) -> Result<()> {
         ctx.state.end_compile()?;
         interpret_wordlist_end_aux(ctx)?;
-        ctx.stack.push_argcount(1, cont::NopCont::instance())
+        ctx.stack.push_argcount(1)
     }
 
     #[cmd(name = "({)", stack)]
@@ -175,12 +175,12 @@ impl Control {
             .lookup(&word, true)?
             .with_context(|| format!("Undefined word `{word}`"))?;
         ctx.stack.push(entry.definition.clone())?;
-        ctx.stack.push_argcount(1, cont::NopCont::instance())
+        ctx.stack.push_argcount(1)
     }
 
     #[cmd(name = "'nop")]
     fn interpret_tick_nop(ctx: &mut Context) -> Result<()> {
-        ctx.stack.push(cont::NopCont::instance())
+        ctx.stack.push_raw(cont::NopCont::value_instance())
     }
 
     // === Dictionary manipulation ===

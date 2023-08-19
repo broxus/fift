@@ -138,9 +138,9 @@ impl ContImpl for InterpreterCont {
                         ctx.stack.push(value.num)?;
                         if let Some(denom) = value.denom {
                             ctx.stack.push(denom)?;
-                            ctx.stack.push_argcount(2, NopCont::instance())?;
+                            ctx.stack.push_argcount(2)?;
                         } else {
-                            ctx.stack.push_argcount(1, NopCont::instance())?;
+                            ctx.stack.push_argcount(1)?;
                         }
                         break 'token;
                     }
@@ -156,12 +156,15 @@ impl ContImpl for InterpreterCont {
                     );
                     return Ok(Some(entry.definition.clone()));
                 } else {
-                    ctx.stack.push_argcount(0, entry.definition.clone())?;
+                    ctx.stack.push_int(0)?;
+                    ctx.stack.push(entry.definition.clone())?;
                 }
             };
 
-            ctx.exit_interpret
-                .store(Rc::new(ctx.next.clone().unwrap_or_else(NopCont::instance)));
+            ctx.exit_interpret.store(match &ctx.next {
+                Some(next) => Rc::new(next.clone()),
+                None => NopCont::value_instance(),
+            });
 
             ctx.next = SeqCont::make(Some(self), ctx.next.take());
             break Ok(Some(compile_exec));
@@ -282,15 +285,23 @@ pub struct NopCont;
 
 impl NopCont {
     thread_local! {
-        static INSTANCE: Cont = Rc::new(NopCont);
+        static INSTANCE: (Cont, Rc<dyn StackValue>) = {
+            let cont = Rc::new(NopCont);
+            let value: Rc<dyn StackValue> = Rc::new(cont.clone() as Rc<dyn ContImpl>);
+            (cont, value)
+        };
     }
 
     pub fn instance() -> Cont {
-        Self::INSTANCE.with(|c| c.clone())
+        Self::INSTANCE.with(|(c, _)| c.clone())
+    }
+
+    pub fn value_instance() -> Rc<dyn StackValue> {
+        Self::INSTANCE.with(|(_, v)| v.clone())
     }
 
     pub fn is_nop(cont: &dyn ContImpl) -> bool {
-        let left = Self::INSTANCE.with(|c| Rc::as_ptr(c) as *const ());
+        let left = Self::INSTANCE.with(|(c, _)| Rc::as_ptr(c) as *const ());
         let right = cont as *const _ as *const ();
         std::ptr::eq(left, right)
     }
