@@ -4,6 +4,7 @@ use anyhow::{Context as _, Result};
 
 use crate::core::*;
 use crate::error::{ExecutionAborted, UnexpectedEof};
+use crate::util::ImmediateInt;
 
 pub struct Control;
 
@@ -164,6 +165,34 @@ impl Control {
     fn interpret_execute_internal(ctx: &mut Context) -> Result<Option<Cont>> {
         let cont = ctx.execute_stack_top()?;
         Ok(Some(cont))
+    }
+
+    #[cmd(name = "(interpret-prepare)", tail)]
+    fn interpret_prepare(ctx: &mut Context) -> Result<Option<Cont>> {
+        let found = ctx.stack.pop_smallint_signed_range(-1, 1)?;
+        Ok(if found == 0 {
+            // Interpret number
+            let string = ctx.stack.pop_string()?;
+            let int = ImmediateInt::try_from_str(&string)?
+                .with_context(|| format!("Failed to parse `{string}` as number"))?;
+
+            let mut res = 1;
+            ctx.stack.push(int.num)?;
+            if let Some(denom) = int.denom {
+                res += 1;
+                ctx.stack.push(denom)?;
+            }
+            ctx.stack.push_argcount(res)?;
+            None
+        } else if found == -1 {
+            // Interpret ordinary word
+            ctx.stack.push_int(0)?;
+            ctx.stack.swap(0, 1)?;
+            None
+        } else {
+            // Interpret active word
+            Some(ctx.stack.pop_cont_owned()?)
+        })
     }
 
     #[cmd(name = "'", active)]

@@ -354,7 +354,78 @@ impl StringUtils {
         stack.push_int(lhs.cmp(&rhs) as i8)
     }
 
-    // TODO: bytes <=> int
+    #[cmd(name = "u>B", stack, args(sgn = false, le = false))]
+    #[cmd(name = "i>B", stack, args(sgn = true, le = false))]
+    #[cmd(name = "Lu>B", stack, args(sgn = false, le = true))]
+    #[cmd(name = "Li>B", stack, args(sgn = true, le = true))]
+    fn interpret_int_to_bytes(stack: &mut Stack, sgn: bool, le: bool) -> Result<()> {
+        let bits = stack.pop_smallint_range(1, if sgn { 264 } else { 256 })?;
+        let int = stack.pop_int()?;
+        anyhow::ensure!(bits % 8 == 0, "Can store only an integer number of bytes");
+        anyhow::ensure!(
+            int.bits() <= bits as _,
+            "Integer does not fit into the buffer"
+        );
+
+        let byte_len = (bits / 8) as usize;
+        let (prefix, mut bytes) = if sgn {
+            let bytes = int.to_signed_bytes_le();
+            (
+                bytes
+                    .last()
+                    .map(|first| (first >> 7) * 255)
+                    .unwrap_or_default(),
+                bytes,
+            )
+        } else {
+            (0, int.to_bytes_le().1)
+        };
+        bytes.resize(byte_len, prefix);
+        if !le {
+            bytes.reverse();
+        }
+        stack.push(bytes)
+    }
+
+    #[cmd(name = "B>u@", stack, args(sgn = false, adv = false, le = false))]
+    #[cmd(name = "B>i@", stack, args(sgn = true, adv = false, le = false))]
+    #[cmd(name = "B>u@+", stack, args(sgn = false, adv = true, le = false))]
+    #[cmd(name = "B>i@+", stack, args(sgn = true, adv = true, le = false))]
+    #[cmd(name = "B>Lu@", stack, args(sgn = false, adv = false, le = true))]
+    #[cmd(name = "B>Li@", stack, args(sgn = true, adv = false, le = true))]
+    #[cmd(name = "B>Lu@+", stack, args(sgn = false, adv = true, le = true))]
+    #[cmd(name = "B>Li@+", stack, args(sgn = true, adv = true, le = true))]
+    fn interpret_bytes_fetch_int(stack: &mut Stack, sgn: bool, adv: bool, le: bool) -> Result<()> {
+        let bits = stack.pop_smallint_range(0, 256 + sgn as u32)?;
+        let mut bytes = stack.pop_bytes()?;
+        anyhow::ensure!(bits % 8 == 0, "Can load only an integer number of bytes");
+
+        let byte_len = (bits / 8) as usize;
+        anyhow::ensure!(bytes.len() >= byte_len, "Not enough bytes in the source");
+
+        let int = {
+            let data = &bytes.as_ref()[..byte_len];
+            match (sgn, le) {
+                (false, false) => BigInt::from_bytes_be(Sign::Plus, data),
+                (false, true) => BigInt::from_bytes_le(Sign::Plus, data),
+                (true, false) => BigInt::from_signed_bytes_be(data),
+                (true, true) => BigInt::from_signed_bytes_le(data),
+            }
+        };
+
+        if adv {
+            match Rc::get_mut(&mut bytes) {
+                Some(inner) => {
+                    inner.copy_within(byte_len.., 0);
+                    inner.truncate(inner.len() - byte_len);
+                    stack.push_raw(bytes)?;
+                }
+                None => stack.push(bytes.as_ref()[byte_len..].to_owned())?,
+            }
+        }
+
+        stack.push(int)
+    }
 
     #[cmd(name = "$>B", stack)]
     fn interpret_string_to_bytes(stack: &mut Stack) -> Result<()> {

@@ -144,6 +144,20 @@ impl Stack {
         })
     }
 
+    pub fn pop_smallint_signed_range(&mut self, min: i32, max: i32) -> Result<i32> {
+        let item = self.pop_int()?;
+        if let Some(item) = item.to_i32() {
+            if item >= min && item <= max {
+                return Ok(item);
+            }
+        }
+        anyhow::bail!(StackError::IntegerOutOfSignedRange {
+            min: min as isize,
+            max: max as isize,
+            actual: item.to_string(),
+        })
+    }
+
     pub fn pop_usize(&mut self) -> Result<usize> {
         let item = self.pop_int()?;
         if let Some(item) = item.to_usize() {
@@ -1279,6 +1293,12 @@ pub enum StackError {
     IntegerOutOfRange {
         min: u32,
         max: usize,
+        actual: String,
+    },
+    #[error("Expected integer in range {min}..={max}, found {actual}")]
+    IntegerOutOfSignedRange {
+        min: isize,
+        max: isize,
         actual: String,
     },
     #[error("Expected a valid utf8 char code, found {0}")]
