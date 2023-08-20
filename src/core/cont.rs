@@ -104,32 +104,29 @@ impl ContImpl for InterpreterCont {
                         return Ok(None);
                     };
 
-                    let mut prefix_entry = None;
-
                     // Find in predefined entries
                     if let Some(entry) = WORD.with(|word| {
                         let mut word = word.borrow_mut();
                         word.clear();
                         word.push_str(token);
+                        word.push(' ');
 
-                        // Find the largest subtoken first
-                        while !word.is_empty() {
-                            if let Some(entry) = ctx.dicts.lookup(&word, false)? {
-                                rewind = token.len() - word.len();
-                                prefix_entry = Some(entry);
-                                break;
-                            }
-                            word.pop();
+                        // Search parsed token as a separate word first
+                        if let Some(entry) = ctx.dicts.lookup(&word, false)? {
+                            return Ok::<_, anyhow::Error>(Some(entry));
                         }
 
-                        word.clear();
-                        word.push_str(token);
-                        word.push(' ');
-                        ctx.dicts.lookup(&word, false)
+                        // Then find the largest possible prefix
+                        while !word.is_empty() {
+                            word.pop();
+                            if let Some(entry) = ctx.dicts.lookup(&word, false)? {
+                                rewind = token.len() - word.len();
+                                return Ok(Some(entry));
+                            }
+                        }
+
+                        Ok(None)
                     })? {
-                        rewind = 0;
-                        break 'entry entry;
-                    } else if let Some(entry) = prefix_entry {
                         break 'entry entry;
                     }
 

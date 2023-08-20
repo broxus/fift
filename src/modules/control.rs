@@ -335,6 +335,11 @@ impl Control {
         ctx.input.scan_skip_whitespace()
     }
 
+    #[cmd(name = "include-depth")]
+    fn interpret_include_depth(ctx: &mut Context) -> Result<()> {
+        ctx.stack.push_int(ctx.input.depth())
+    }
+
     #[cmd(name = "include", tail)]
     fn interpret_include(ctx: &mut Context) -> Result<Option<Cont>> {
         let name = ctx.stack.pop_string()?;

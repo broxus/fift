@@ -34,6 +34,10 @@ impl Lexer {
         })
     }
 
+    pub fn depth(&self) -> i32 {
+        (self.blocks.len() as i32) - 1
+    }
+
     pub fn scan_word(&mut self) -> Result<Option<&str>> {
         let Some(input) = self.blocks.last_mut() else {
             return Ok(None);
