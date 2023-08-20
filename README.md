@@ -8,9 +8,9 @@
 
 [docs-url]: https://docs.rs/fift
 
-[rust-version-badge]: https://img.shields.io/badge/rustc-1.65+-lightgray.svg
+[rust-version-badge]: https://img.shields.io/badge/rustc-1.70+-lightgray.svg
 
-[rust-version-link]: https://blog.rust-lang.org/2022/11/03/Rust-1.65.0.html
+[rust-version-link]: https://blog.rust-lang.org/2023/06/01/Rust-1.70.0.html
 
 [workflow-badge]: https://img.shields.io/github/actions/workflow/status/broxus/fift/master.yml?branch=master
 
