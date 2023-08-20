@@ -225,6 +225,54 @@ impl Control {
         }
     }
 
+    #[cmd(name = "(word-prefix-find)")]
+    fn interpret_word_prefix_find(ctx: &mut Context) -> Result<()> {
+        let mut rewind = 0;
+        let (word, entry) = 'entry: {
+            let Some(token) = ctx.input.scan_word()? else {
+                ctx.stack.push(String::new())?;
+                ctx.stack.push_int(0)?;
+                return Ok(());
+            };
+
+            let mut word = token.to_owned();
+            word.push(' ');
+
+            // Search parsed token as a separate word first
+            if let Some(entry) = ctx.dicts.lookup(&word, false)? {
+                //ctx.input.scan_skip_whitespace()?;
+                break 'entry (word, Some(entry));
+            }
+
+            // Then find the largest possible prefix
+            while !word.is_empty() {
+                word.pop();
+                if let Some(entry) = ctx.dicts.lookup(&word, false)? {
+                    rewind = token.len() - word.len();
+                    break 'entry (word, Some(entry));
+                }
+            }
+
+            // Just push token otherwise
+            word.clear();
+            word.push_str(token);
+            //ctx.input.scan_skip_whitespace()?;
+            (word, None)
+        };
+        ctx.input.rewind(rewind);
+
+        match entry {
+            None => {
+                ctx.stack.push(word)?;
+                ctx.stack.push_int(0)
+            }
+            Some(entry) => {
+                ctx.stack.push(entry.definition.clone())?;
+                ctx.stack.push_int(if entry.active { 1 } else { -1 })
+            }
+        }
+    }
+
     #[cmd(name = "create")]
     fn interpret_create(ctx: &mut Context) -> Result<()> {
         // NOTE: same as `:`, but not active
@@ -361,7 +409,19 @@ impl Control {
 
     #[cmd(name = "skipspc")]
     fn interpret_skipspc(ctx: &mut Context) -> Result<()> {
-        ctx.input.scan_skip_whitespace()
+        ctx.input.scan_skip_whitespace()?;
+        Ok(())
+    }
+
+    #[cmd(name = "seekeof?", args(mode = 1))]
+    #[cmd(name = "(seekeof?)", args(mode = -1))]
+    fn interpret_seekeof(ctx: &mut Context, mut mode: i32) -> Result<()> {
+        if mode == -1 {
+            mode = ctx.stack.pop_smallint_signed_range(-1, 3)?;
+        }
+        _ = mode; // NOTE: unused
+        let eof = !ctx.input.scan_skip_whitespace()?;
+        ctx.stack.push_bool(eof)
     }
 
     #[cmd(name = "include-depth")]

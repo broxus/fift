@@ -86,11 +86,11 @@ impl Lexer {
         }
     }
 
-    pub fn scan_skip_whitespace(&mut self) -> Result<()> {
+    pub fn scan_skip_whitespace(&mut self) -> Result<bool> {
         if let Some(input) = self.blocks.last_mut() {
             input.skip_whitespace()
         } else {
-            Ok(())
+            Ok(false)
         }
     }
 
@@ -254,17 +254,17 @@ impl SourceBlockState {
         self.line_offset -= offset;
     }
 
-    fn skip_whitespace(&mut self) -> Result<()> {
+    fn skip_whitespace(&mut self) -> Result<bool> {
         self.prev_line_offset = self.line_offset;
 
         loop {
             if (self.line.is_empty() || self.line_offset >= self.line.len()) && !self.read_line()? {
-                return Ok(());
+                return Ok(false);
             }
 
             self.skip_line_whitespace();
             if self.line_offset < self.line.len() {
-                return Ok(());
+                return Ok(true);
             }
         }
     }
@@ -294,12 +294,18 @@ impl SourceBlockState {
     }
 
     fn read_line(&mut self) -> Result<bool> {
+        const SKIP_PREFIX: &str = "#!";
+
         self.prev_line_offset = 0;
         self.line_offset = 0;
         self.line_number += 1;
         self.line.clear();
-        let n = self.block.buffer_mut().read_line(&mut self.line)?;
-        Ok(n > 0)
+        let not_eof = self.block.buffer_mut().read_line(&mut self.line)? > 0;
+        if not_eof && self.line_number == 1 && self.line.starts_with(SKIP_PREFIX) {
+            self.read_line()
+        } else {
+            Ok(not_eof)
+        }
     }
 }
 
