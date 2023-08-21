@@ -8,15 +8,16 @@ use console::style;
 use fift::core::lexer::LexerPosition;
 use fift::core::{Environment, SourceBlock};
 
-use self::args::CmdArgsUtils;
 use self::env::SystemEnvironment;
 use self::input::LineReader;
+use self::modules::*;
 use self::util::{ArgsOrVersion, RestArgs, RestArgsDelimiter};
 
-mod args;
 mod env;
 mod input;
 mod util;
+
+mod modules;
 
 /// A simple Fift interpreter. Type `bye` to quie,
 /// or `words` to get a list of all commands
@@ -101,7 +102,8 @@ fn main() -> Result<ExitCode> {
     // Prepare Fift context
     let mut ctx = fift::Context::new(&mut env, &mut stdout)
         .with_basic_modules()?
-        .with_module(CmdArgsUtils::new(rest))?;
+        .with_module(CmdArgsUtils::new(rest))?
+        .with_module(ShellUtils)?;
 
     for source_block in source_blocks {
         ctx.add_source_block(source_block);

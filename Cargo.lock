@@ -337,6 +337,7 @@ version = "0.1.12"
 dependencies = [
  "anyhow",
  "argh",
+ "bitflags 2.4.0",
  "console",
  "fift",
  "rustyline",

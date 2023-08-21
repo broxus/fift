@@ -15,6 +15,7 @@ path = "src/main.rs"
 [dependencies]
 anyhow = "1.0"
 argh = "0.1"
+bitflags = "2.3"
 console = "0.15"
 rustyline = { version = "12.0", default-features = false }
 
