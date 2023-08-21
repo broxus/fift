@@ -63,19 +63,21 @@ fn main() -> Result<ExitCode> {
             .unwrap_or_else(|| std::env::var("FIFTPATH").unwrap_or_default()),
     );
 
-    let interactive = app.interactive || app.source_files.is_empty();
+    let interactive = app.interactive || rest.is_empty() && app.source_files.is_empty();
 
     // Prepare the source block which will be executed
     let mut stdout: Box<dyn std::io::Write> = Box::new(std::io::stdout());
 
     let mut source_blocks = Vec::new();
 
-    if interactive && std::io::stdin().is_terminal() {
-        let mut line_reader = LineReader::new()?;
-        stdout = line_reader.create_external_printer()?;
-        source_blocks.push(SourceBlock::new("<stdin>", line_reader));
-    } else if app.source_files.is_empty() {
-        source_blocks.push(SourceBlock::new("<stdin>", std::io::stdin().lock()));
+    if interactive {
+        if std::io::stdin().is_terminal() {
+            let mut line_reader = LineReader::new()?;
+            stdout = line_reader.create_external_printer()?;
+            source_blocks.push(SourceBlock::new("<stdin>", line_reader));
+        } else {
+            source_blocks.push(SourceBlock::new("<stdin>", std::io::stdin().lock()));
+        }
     }
 
     if let Some(path) = rest.first() {

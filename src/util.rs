@@ -1,9 +1,14 @@
 use anyhow::Result;
+use crc::Crc;
 use everscale_types::cell::MAX_BIT_LEN;
 use everscale_types::prelude::*;
 use num_bigint::BigInt;
 use num_traits::{Num, ToPrimitive};
 use unicode_segmentation::UnicodeSegmentation;
+
+pub const CRC_16: Crc<u16> = Crc::<u16>::new(&crc::CRC_16_XMODEM);
+pub const CRC_32: Crc<u32> = Crc::<u32>::new(&crc::CRC_32_ISO_HDLC);
+pub const CRC_32_C: Crc<u32> = Crc::<u32>::new(&crc::CRC_32_ISCSI);
 
 pub struct ImmediateInt {
     pub num: BigInt,
@@ -96,6 +101,24 @@ pub(crate) fn decode_base64<T: AsRef<[u8]>>(data: T) -> Result<Vec<u8>, base64::
     use base64::Engine;
     fn decode_base64_impl(data: &[u8]) -> std::result::Result<Vec<u8>, base64::DecodeError> {
         base64::engine::general_purpose::STANDARD.decode(data)
+    }
+    decode_base64_impl(data.as_ref())
+}
+
+#[inline]
+pub(crate) fn encode_base64_url<T: AsRef<[u8]>>(data: T) -> String {
+    use base64::Engine;
+    fn encode_base64_impl(data: &[u8]) -> String {
+        base64::engine::general_purpose::URL_SAFE.encode(data)
+    }
+    encode_base64_impl(data.as_ref())
+}
+
+#[inline]
+pub(crate) fn decode_base64_url<T: AsRef<[u8]>>(data: T) -> Result<Vec<u8>, base64::DecodeError> {
+    use base64::Engine;
+    fn decode_base64_impl(data: &[u8]) -> std::result::Result<Vec<u8>, base64::DecodeError> {
+        base64::engine::general_purpose::URL_SAFE.decode(data)
     }
     decode_base64_impl(data.as_ref())
 }

@@ -1,6 +1,6 @@
 use std::rc::Rc;
 
-use anyhow::{Context as _, Result};
+use anyhow::Result;
 
 use fift::core::*;
 
@@ -53,8 +53,10 @@ struct CmdArgCont(Vec<Rc<dyn StackValue>>);
 impl ContImpl for CmdArgCont {
     fn run(self: Rc<Self>, ctx: &mut Context) -> Result<Option<Cont>> {
         let n = ctx.stack.pop_smallint_range(0, 999999)? as usize;
-        let arg = self.0.get(n).context("Cmd arg index out of range")?.clone();
-        ctx.stack.push_raw(arg)?;
+        match self.0.get(n).cloned() {
+            None => ctx.stack.push_null()?,
+            Some(value) => ctx.stack.push_raw(value)?,
+        }
         Ok(None)
     }
 

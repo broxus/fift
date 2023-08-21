@@ -57,7 +57,7 @@ impl Environment for SystemEnvironment {
     }
 
     fn write_file(&mut self, name: &str, contents: &[u8]) -> std::io::Result<()> {
-        std::fs::write(self.resolve_file(name)?, contents)?;
+        std::fs::write(name, contents)?;
         Ok(())
     }
 

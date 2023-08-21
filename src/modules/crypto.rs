@@ -1,8 +1,8 @@
 use anyhow::{Context as _, Result};
-use crc::Crc;
 use everscale_crypto::ed25519;
 
 use crate::core::*;
+use crate::util::{CRC_16, CRC_32, CRC_32_C};
 
 pub struct Crypto;
 
@@ -106,7 +106,3 @@ fn pop_signature(stack: &mut Stack) -> Result<[u8; 64]> {
     let b = stack.pop_bytes()?;
     b.as_slice().try_into().ok().context("Invalid signature")
 }
-
-const CRC_16: Crc<u16> = Crc::<u16>::new(&crc::CRC_16_XMODEM);
-const CRC_32: Crc<u32> = Crc::<u32>::new(&crc::CRC_32_ISO_HDLC);
-const CRC_32_C: Crc<u32> = Crc::<u32>::new(&crc::CRC_32_ISCSI);

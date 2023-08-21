@@ -1,6 +1,9 @@
 use std::rc::Rc;
+use std::str::FromStr;
 
 use anyhow::Result;
+use everscale_types::models::StdAddr;
+use everscale_types::prelude::HashBytes;
 use num_bigint::{BigInt, Sign};
 use num_traits::Num;
 use sha2::Digest;
@@ -453,16 +456,120 @@ impl StringUtils {
         }
     }
 
-    #[cmd(name = "B>base64", stack)]
-    fn interpret_bytes_to_base64(stack: &mut Stack) -> Result<()> {
+    #[cmd(name = "B>base64", stack, args(url = false))]
+    #[cmd(name = "B>base64url", stack, args(url = true))]
+    fn interpret_bytes_to_base64(stack: &mut Stack, url: bool) -> Result<()> {
         let bytes = stack.pop_bytes()?;
-        stack.push(encode_base64(&*bytes))
+        stack.push(if url {
+            encode_base64_url(&*bytes)
+        } else {
+            encode_base64(&*bytes)
+        })
     }
 
-    #[cmd(name = "base64>B", stack)]
-    fn interpret_base64_to_bytes(stack: &mut Stack) -> Result<()> {
+    #[cmd(name = "base64>B", stack, args(url = false))]
+    #[cmd(name = "base64url>B", stack, args(url = true))]
+    fn interpret_base64_to_bytes(stack: &mut Stack, url: bool) -> Result<()> {
         let string = stack.pop_string()?;
-        let bytes = decode_base64(&*string)?;
+        let bytes = if url {
+            decode_base64_url(&*string)?
+        } else {
+            decode_base64(&*string)?
+        };
         stack.push(bytes)
+    }
+
+    #[cmd(name = "smca>$", stack)]
+    fn interpret_pack_std_smc_addr(stack: &mut Stack) -> Result<()> {
+        let mode = stack.pop_smallint_range(0, 7)? as u8;
+        let int = stack.pop_int()?;
+        anyhow::ensure!(int.sign() != Sign::Minus, "Expected non-negative integer");
+        anyhow::ensure!(int.bits() <= 256, "Integer does not fit into the buffer");
+
+        let workchain = stack.pop_smallint_signed_range(-0x80, 0x7f)? as i8;
+        let testnet = mode & 2 != 0;
+        let bounceable = mode & 1 == 0;
+        let url_safe = mode & 4 != 0;
+
+        let mut bytes = int.to_bytes_be().1;
+        bytes.resize(32, 0);
+        bytes.reverse();
+
+        let mut buffer = [0u8; 36];
+        buffer[0] = 0x51 - (bounceable as u8) * 0x40 + (testnet as u8) * 0x80;
+        buffer[1] = workchain as u8;
+        buffer[2..34].copy_from_slice(&bytes);
+
+        let crc = CRC_16.checksum(&buffer[..34]);
+        buffer[34] = (crc >> 8) as u8;
+        buffer[35] = crc as u8;
+
+        stack.push(if url_safe {
+            encode_base64_url(buffer)
+        } else {
+            encode_base64(buffer)
+        })
+    }
+
+    #[cmd(name = "$>smca", stack)]
+    fn interpret_unpack_std_smc_addr(stack: &mut Stack) -> Result<()> {
+        struct AddrFlags {
+            testnet: bool,
+            bounceable: bool,
+        }
+
+        fn unpack_base64_addr(s: &str) -> Result<(AddrFlags, StdAddr)> {
+            anyhow::ensure!(s.len() == 48, "Invalid address string length");
+
+            let buffer = match decode_base64(s) {
+                Ok(buffer) => buffer,
+                Err(e) => match decode_base64_url(s) {
+                    Ok(buffer) => buffer,
+                    Err(_) => return Err(e.into()),
+                },
+            };
+            anyhow::ensure!(buffer.len() == 36, "Invalid decoder buffer length");
+
+            let crc = CRC_16.checksum(&buffer[..34]);
+            anyhow::ensure!(
+                crc == ((buffer[34] as u16) << 8) | buffer[35] as u16,
+                "CRC mismatch"
+            );
+            let flags = buffer[0];
+            anyhow::ensure!(flags & 0x3f != 0x11, "Invalid flags");
+            let flags = AddrFlags {
+                testnet: flags & 0x80 != 0,
+                bounceable: flags & 0x40 == 0,
+            };
+
+            Ok((
+                flags,
+                StdAddr::new(
+                    buffer[1] as i8,
+                    HashBytes(buffer[2..34].try_into().unwrap()),
+                ),
+            ))
+        }
+
+        let string = stack.pop_string()?;
+        let (flags, addr) = 'addr: {
+            if string.contains(':') {
+                let flags = AddrFlags {
+                    testnet: false,
+                    bounceable: true,
+                };
+                if let Ok(addr) = StdAddr::from_str(&string) {
+                    break 'addr (flags, addr);
+                }
+            } else if let Ok(addr) = unpack_base64_addr(&string) {
+                break 'addr addr;
+            };
+            return stack.push_bool(false);
+        };
+
+        stack.push_int(addr.workchain)?;
+        stack.push_int(BigInt::from_bytes_be(Sign::Plus, addr.address.as_slice()))?;
+        stack.push_int(((flags.testnet as u8) << 1) + !flags.bounceable as u8)?;
+        stack.push_bool(true)
     }
 }

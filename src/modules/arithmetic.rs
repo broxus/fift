@@ -100,6 +100,39 @@ impl Arithmetic {
         stack.push(r)
     }
 
+    #[cmd(name = "*/", stack, args(r = Rounding::Floor))]
+    #[cmd(name = "*/r", stack, args(r = Rounding::Nearest))]
+    #[cmd(name = "*/c", stack, args(r = Rounding::Ceil))]
+    fn interpret_times_div(stack: &mut Stack, r: Rounding) -> Result<()> {
+        let z = stack.pop_int()?;
+        let y = stack.pop_int()?;
+        let mut x = stack.pop_int()?;
+        *Rc::make_mut(&mut x) *= y.as_ref();
+        stack.push(divmod(&x, &z, r).0)
+    }
+
+    #[cmd(name = "*/mod", stack, args(r = Rounding::Floor))]
+    #[cmd(name = "*/rmod", stack, args(r = Rounding::Nearest))]
+    #[cmd(name = "*/cmod", stack, args(r = Rounding::Ceil))]
+    fn interpret_times_divmod(stack: &mut Stack, r: Rounding) -> Result<()> {
+        let z = stack.pop_int()?;
+        let y = stack.pop_int()?;
+        let mut x = stack.pop_int()?;
+        *Rc::make_mut(&mut x) *= y.as_ref();
+        let (q, r) = divmod(&x, &z, r);
+        stack.push(q)?;
+        stack.push(r)
+    }
+
+    #[cmd(name = "*mod", stack, args(r = Rounding::Floor))]
+    fn interpret_times_mod(stack: &mut Stack, r: Rounding) -> Result<()> {
+        let z = stack.pop_int()?;
+        let y = stack.pop_int()?;
+        let mut x = stack.pop_int()?;
+        *Rc::make_mut(&mut x) *= y.as_ref();
+        stack.push(divmod(&x, &z, r).1)
+    }
+
     #[cmd(name = "1<<", stack, args(negate = false, minus_one = false))]
     #[cmd(name = "-1<<", stack, args(negate = true, minus_one = false))]
     #[cmd(name = "1<<1-", stack, args(negate = false, minus_one = true))]
@@ -162,6 +195,17 @@ impl Arithmetic {
         let mut x = stack.pop_int()?;
         *Rc::make_mut(&mut x) >>= y;
         stack.push_raw(x)
+    }
+
+    #[cmd(name = "<</", stack, args(r = Rounding::Floor))]
+    #[cmd(name = "<</r", stack, args(r = Rounding::Nearest))]
+    #[cmd(name = "<</c", stack, args(r = Rounding::Ceil))]
+    fn interpret_lshift_div(stack: &mut Stack, r: Rounding) -> Result<()> {
+        let z = stack.pop_smallint_range(0, 256)?;
+        let y = stack.pop_int()?;
+        let mut x = stack.pop_int()?;
+        *Rc::make_mut(&mut x) <<= z;
+        stack.push(divmod(&x, &y, r).0)
     }
 
     // TODO: mul shift, shift div
