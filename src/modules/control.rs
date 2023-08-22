@@ -434,6 +434,14 @@ impl Control {
         let name = ctx.stack.pop_string()?;
         let source_block = ctx.env.include(&name)?;
         ctx.input.push_source_block(source_block);
+
+        if let Some(max_include_depth) = ctx.limits.max_include_depth {
+            anyhow::ensure!(
+                ctx.input.depth() <= max_include_depth as i32,
+                "Max include depth exceeded: {max_include_depth}/{max_include_depth}"
+            );
+        }
+
         ctx.next = cont::SeqCont::make(Some(Rc::new(ExitSourceBlockCont)), ctx.next.take());
         Ok(Some(Rc::new(cont::InterpreterCont)))
     }

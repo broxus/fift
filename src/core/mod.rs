@@ -28,6 +28,9 @@ pub struct Context<'a> {
     pub next: Option<Cont>,
     pub dicts: Dictionaries,
 
+    pub limits: ExecutionLimits,
+    pub stats: ExecutionStats,
+
     pub input: Lexer,
     pub exit_interpret: SharedBox,
 
@@ -43,6 +46,8 @@ impl<'a> Context<'a> {
             exit_code: 0,
             next: None,
             dicts: Default::default(),
+            limits: Default::default(),
+            stats: Default::default(),
             input: Default::default(),
             exit_interpret: Default::default(),
             env,
@@ -68,9 +73,20 @@ impl<'a> Context<'a> {
         self.input.push_source_block(block);
     }
 
+    pub fn with_limits(mut self, limits: ExecutionLimits) -> Self {
+        self.set_limits(limits);
+        self
+    }
+
+    pub fn set_limits(&mut self, limits: ExecutionLimits) {
+        self.limits = limits;
+    }
+
     pub fn run(&mut self) -> Result<u8> {
+        self.stats = Default::default();
         let mut current = Some(Rc::new(cont::InterpreterCont) as Cont);
         while let Some(cont) = current.take() {
+            self.stats.inc_step(&self.limits)?;
             current = cont.run(self)?;
             if current.is_none() {
                 current = self.next.take();
@@ -183,5 +199,29 @@ pub trait Module {
 impl<T: Module> Module for &T {
     fn init(&self, d: &mut Dictionary) -> Result<()> {
         T::init(self, d)
+    }
+}
+
+#[derive(Debug, Default, Clone)]
+pub struct ExecutionLimits {
+    pub max_steps: Option<usize>,
+    pub max_include_depth: Option<u16>,
+}
+
+#[derive(Debug, Default, Clone)]
+pub struct ExecutionStats {
+    pub step: usize,
+}
+
+impl ExecutionStats {
+    pub fn inc_step(&mut self, limits: &ExecutionLimits) -> Result<()> {
+        self.step += 1;
+        if let Some(max_steps) = limits.max_steps {
+            anyhow::ensure!(
+                self.step <= max_steps,
+                "Max execution steps exceeded: {max_steps}/{max_steps}"
+            );
+        }
+        Ok(())
     }
 }
