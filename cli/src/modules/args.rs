@@ -16,7 +16,7 @@ impl CmdArgsUtils {
         let name = Rc::new(args.next().unwrap_or_default()) as Rc<dyn StackValue>;
 
         let args = args
-            .map(|value| Rc::new(value.clone()) as Rc<dyn StackValue>)
+            .map(|value| Rc::new(value) as Rc<dyn StackValue>)
             .collect::<Vec<_>>();
 
         Self { name, args }

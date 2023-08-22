@@ -82,7 +82,7 @@ fn main() -> Result<ExitCode> {
     }
 
     if let Some(path) = rest.first() {
-        source_blocks.push(env.include(&path)?);
+        source_blocks.push(env.include(path)?);
     }
 
     for path in app.source_files.into_iter().rev() {

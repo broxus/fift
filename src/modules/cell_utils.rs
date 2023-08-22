@@ -279,11 +279,14 @@ impl CellUtils {
                 if advance {
                     let range = cs.range();
                     Rc::make_mut(&mut raw_cs).set_range(range);
-                    stack.push_raw(raw_cs)?;
                 }
             }
             Err(e) if !quiet => return Err(e.into()),
             _ => {}
+        }
+
+        if advance {
+            stack.push_raw(raw_cs)?;
         }
 
         if quiet {
@@ -322,11 +325,14 @@ impl CellUtils {
                 if advance {
                     let range = cs.range();
                     Rc::make_mut(&mut cs_raw).set_range(range);
-                    stack.push_raw(cs_raw)?;
                 }
             }
             Err(e) if !quiet => return Err(e.into()),
             _ => {}
+        }
+
+        if advance {
+            stack.push_raw(cs_raw)?;
         }
 
         if quiet {
@@ -346,15 +352,16 @@ impl CellUtils {
         let cell = cs.load_reference_cloned();
         let is_ok = cell.is_ok();
 
-        match cell {
-            Ok(cell) => {
-                stack.push(cell)?;
-                if advance {
-                    let range = cs.range();
-                    Rc::make_mut(&mut cs_raw).set_range(range);
-                    stack.push_raw(cs_raw)?;
-                }
+        if advance {
+            if is_ok {
+                let range = cs.range();
+                Rc::make_mut(&mut cs_raw).set_range(range);
             }
+            stack.push_raw(cs_raw)?;
+        }
+
+        match cell {
+            Ok(cell) => stack.push(cell)?,
             Err(e) if !quiet => return Err(e.into()),
             _ => {}
         }
