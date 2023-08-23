@@ -491,7 +491,7 @@ impl StringUtils {
         let bounceable = mode & 1 == 0;
         let url_safe = mode & 4 != 0;
 
-        let mut bytes = int.to_bytes_be().1;
+        let mut bytes = int.to_bytes_le().1;
         bytes.resize(32, 0);
         bytes.reverse();
 
@@ -536,7 +536,7 @@ impl StringUtils {
                 "CRC mismatch"
             );
             let flags = buffer[0];
-            anyhow::ensure!(flags & 0x3f != 0x11, "Invalid flags");
+            anyhow::ensure!(flags & 0x3f == 0x11, "Invalid flags");
             let flags = AddrFlags {
                 testnet: flags & 0x80 != 0,
                 bounceable: flags & 0x40 == 0,
