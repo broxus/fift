@@ -1,26 +1,6 @@
 { 0 word drop 0 'nop } :: //
 { char " word 1 { swap { abort } if drop } } ::_ abort"
 { { bl word dup "" $= abort"comment extends after end of file" "*/" $= } until 0 'nop } :: /*
-
-/*
-    This file is part of TON Blockchain Library.
-
-    TON Blockchain Library is free software: you can redistribute it and/or modify
-    it under the terms of the GNU Lesser General Public License as published by
-    the Free Software Foundation, either version 2 of the License, or
-    (at your option) any later version.
-
-    TON Blockchain Library is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU Lesser General Public License for more details.
-
-    You should have received a copy of the GNU Lesser General Public License
-    along with TON Blockchain Library.  If not, see <http://www.gnu.org/licenses/>.
-
-    Copyright 2017-2020 Telegram Systems LLP
-*/
-
 // { bl word 1 2 ' (create) } "::" 1 (create)
 // { bl word 0 2 ' (create) } :: :
 // { bl word 2 2 ' (create) } :: :_
@@ -138,7 +118,7 @@ variable base
 { true (atom) drop } : atom
 { bl word atom 1 'nop } ::_ `
 { hole dup 1 { @ execute } does create } : recursive
-{ 0 { 1+ dup 1 ' $() does over (.) "$" swap $+ 0 (create) } rot times drop } : :$1..n
+// { 0 { 1+ dup 1 ' $() does over (.) "$" swap $+ 0 (create) } rot times drop } : :$1..n
 { 10 hold } : +cr
 { 9 hold } : +tab
 { "" swap { 0 word 2dup $cmp } { rot swap $+ +cr swap } while 2drop } : scan-until-word

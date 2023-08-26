@@ -93,10 +93,7 @@ fn main() -> Result<ExitCode> {
     if let Some(lib) = &app.lib {
         source_blocks.push(env.include(lib)?);
     } else if !app.bare {
-        source_blocks.push(SourceBlock::new(
-            "<default Fift.fif>",
-            std::io::Cursor::new(include_str!("Fift.fif")),
-        ));
+        source_blocks.push(env.include(fift_libs::base_lib().name)?);
     }
 
     // Prepare Fift context

@@ -311,7 +311,7 @@ checksum = "e825f6987101665dea6ec934c09ec6d721de7bc1bf92248e1d5810c8cd636b77"
 
 [[package]]
 name = "fift"
-version = "0.1.15"
+version = "0.1.16"
 dependencies = [
  "ahash",
  "anyhow",
@@ -333,15 +333,20 @@ dependencies = [
 
 [[package]]
 name = "fift-cli"
-version = "0.1.15"
+version = "0.1.16"
 dependencies = [
  "anyhow",
  "argh",
  "bitflags 2.4.0",
  "console",
  "fift",
+ "fift-libs",
  "rustyline",
 ]
+
+[[package]]
+name = "fift-libs"
+version = "0.1.16"
 
 [[package]]
 name = "fift-proc"

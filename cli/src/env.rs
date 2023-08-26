@@ -21,16 +21,20 @@ impl SystemEnvironment {
         Self { include_dirs }
     }
 
-    fn resolve_file(&self, name: &str) -> Result<PathBuf> {
+    fn resolve_file(&self, name: &str) -> Result<Resolved> {
         if Path::new(name).is_file() {
-            return Ok(PathBuf::from(name));
+            return Ok(Resolved::File(PathBuf::from(name)));
         }
 
         for dir in &self.include_dirs {
             let path = dir.join(name);
             if path.is_file() {
-                return Ok(path);
+                return Ok(Resolved::File(path));
             }
+        }
+
+        if let Some(lib) = fift_libs::all().get(name) {
+            return Ok(Resolved::Lib(*lib));
         }
 
         Err(std::io::Error::new(
@@ -62,22 +66,45 @@ impl Environment for SystemEnvironment {
     }
 
     fn read_file(&mut self, name: &str) -> std::io::Result<Vec<u8>> {
-        std::fs::read(self.resolve_file(name)?).map_err(From::from)
+        match self.resolve_file(name)? {
+            Resolved::File(path) => std::fs::read(path),
+            Resolved::Lib(lib) => Ok(lib.as_bytes().to_vec()),
+        }
     }
 
     fn read_file_part(&mut self, name: &str, offset: u64, len: u64) -> std::io::Result<Vec<u8>> {
-        let mut result = Vec::new();
+        fn read_part<R>(mut r: R, offset: u64, len: u64) -> std::io::Result<Vec<u8>>
+        where
+            R: Read + Seek,
+        {
+            let mut result = Vec::new();
+            r.seek(SeekFrom::Start(offset))?;
+            r.take(len).read_to_end(&mut result)?;
+            Ok(result)
+        }
 
-        let file = File::open(self.resolve_file(name)?)?;
-        let mut reader = BufReader::new(file);
-        reader.seek(SeekFrom::Start(offset))?;
-        reader.take(len).read_to_end(&mut result)?;
-        Ok(result)
+        match self.resolve_file(name)? {
+            Resolved::File(path) => {
+                let r = BufReader::new(File::open(path)?);
+                read_part(r, offset, len)
+            }
+            Resolved::Lib(lib) => read_part(std::io::Cursor::new(lib), offset, len),
+        }
     }
 
     fn include(&self, name: &str) -> std::io::Result<SourceBlock> {
-        let file = File::open(self.resolve_file(name)?)?;
-        let buffer = BufReader::new(file);
-        Ok(fift::core::SourceBlock::new(name, buffer))
+        Ok(match self.resolve_file(name)? {
+            Resolved::File(path) => {
+                let file = File::open(path)?;
+                let buffer = BufReader::new(file);
+                fift::core::SourceBlock::new(name, buffer)
+            }
+            Resolved::Lib(lib) => fift::core::SourceBlock::new(name, std::io::Cursor::new(lib)),
+        })
     }
+}
+
+enum Resolved {
+    File(PathBuf),
+    Lib(&'static str),
 }
