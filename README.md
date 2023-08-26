@@ -24,9 +24,15 @@ Rust implementation of the Fift esoteric language.
 
 ## Installation
 
+Compile from source:
 ```bash
 curl https://sh.rustup.rs -sSf | sh
 cargo install --locked fift-cli
+```
+
+Or install as a binary:
+```bash
+curl -fsSL https://fift.rs/install | bash
 ```
 
 ## Usage

@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" href="/favicon.ico" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Fift</title>
+    <style>
+      html {
+        box-sizing: border-box;
+        font-size: 16px;
+        height: 100%;
+      }
+
+      *,
+      *:before,
+      *:after {
+        box-sizing: inherit;
+      }
+
+      body,
+      h1,
+      h2,
+      h3,
+      h4,
+      h5,
+      h6,
+      p {
+        margin: 0;
+        padding: 0;
+        font-weight: normal;
+      }
+
+      button::-moz-focus-inner,
+      input::-moz-focus-inner {
+        border: 0;
+        padding: 0;
+      }
+
+      body {
+        background: #282828;
+        color: #ebdbb2;
+
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
+        height: 100%;
+
+        text-rendering: optimizeLegibility;
+        -webkit-font-smoothing: antialiased;
+        -moz-osx-font-smoothing: grayscale;
+
+        font-family: Menlo, Monaco, Consolas, "Courier New", monospace;
+      }
+
+      header {
+        position: relative;
+        bottom: 2em;
+
+        text-align: center;
+        letter-spacing: 0.1em;
+      }
+
+      main {
+        display: block;
+
+        width: 80%;
+        max-width: 800px;
+        padding: 1em;
+
+        background: #1d2021;
+      }
+
+      main p {
+        margin: 0.2em 0.5em;
+        color: #83c07c;
+      }
+
+      main .line {
+        display: flex;
+        flex-direction: row;
+      }
+
+      main code {
+        display: block;
+        position: relative;
+        padding: 0.5em;
+        width: 100%;
+        font-size: 1.2em;
+        line-height: 1.2em;
+      }
+
+      main .button {
+        cursor: pointer;
+
+        width: 5em;
+        height: 2.2em;
+        font-size: 1.2em;
+        line-height: 2.4em;
+        text-align: center;
+
+        background: #b8bb26;
+        color: #4d4d0d;
+        padding: 0 0.5em;
+      }
+
+      main .button:hover {
+        background: #a9ac23;
+      }
+
+      main .button:active {
+        background: #98971a;
+      }
+
+      footer {
+        position: relative;
+        top: 2em;
+      }
+
+      footer a {
+        color: #83a598;
+        text-decoration: none;
+      }
+
+      footer a:hover {
+        text-decoration: underline;
+      }
+
+      .noselect {
+        -webkit-touch-callout: none; /* iOS Safari */
+        -webkit-user-select: none; /* Safari */
+        -khtml-user-select: none; /* Konqueror HTML */
+        -moz-user-select: none; /* Old versions of Firefox */
+        -ms-user-select: none; /* Internet Explorer/Edge */
+        user-select: none;
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>Rust implementation of the<br />Fift esoteric language</h1>
+    </header>
+    <main>
+      <p class="noselect">
+        # Run the following, then follow the onscreen instructions:
+      </p>
+      <div class="line">
+        <code>curl -fsSL https://fift.rs/install | bash</code>
+        <span class="button noselect">COPY</span>
+      </div>
+    </main>
+    <footer>
+      <a href="https://github.com/broxus/fift" target="_blank"
+        >https://github.com/broxus/fift</a
+      >
+    </footer>
+  </body>
+  <script>
+    (() => {
+      window.onload = function () {
+        const button = document.querySelector("span.button");
+        const code = document.querySelector("code");
+
+        button.onclick = function () {
+          event.preventDefault();
+
+          const range = document.createRange();
+          range.selectNode(code);
+          window.getSelection().removeAllRanges();
+          window.getSelection().addRange(range);
+
+          document.execCommand("copy", false, null);
+
+          window.getSelection().removeAllRanges();
+        };
+      };
+    })();
+  </script>
+</html>
