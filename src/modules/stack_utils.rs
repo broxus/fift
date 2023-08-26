@@ -1,3 +1,5 @@
+use std::rc::Rc;
+
 use anyhow::Result;
 use num_traits::Zero;
 
@@ -143,5 +145,86 @@ impl StackUtils {
             stack.push_raw(item.clone())?;
         }
         stack.push_raw(item)
+    }
+
+    /// === Low-level stack manipulation ===
+
+    #[cmd(name = "<xchg>", stack)]
+    fn interpret_make_xchg(stack: &mut Stack) -> Result<()> {
+        let mut y = stack.pop_smallint_range(0, 255)?;
+        let mut x = stack.pop_smallint_range(0, 255)?;
+        if x > y {
+            std::mem::swap(&mut x, &mut y);
+        }
+
+        match (x, y) {
+            (0, 0) => stack.push(cont::NopCont::instance()),
+            (0, 1) => stack.push(Rc::new(interpret_swap as cont::StackWordFunc) as Cont),
+            _ => stack.push(Rc::new(XchgCont { x, y }) as Cont),
+        }
+    }
+
+    #[cmd(name = "<push>", stack)]
+    fn interpret_make_push(stack: &mut Stack) -> Result<()> {
+        let x = stack.pop_smallint_range(0, 255)?;
+        match x {
+            0 => stack.push(Rc::new(interpret_dup as cont::StackWordFunc) as Cont),
+            1 => stack.push(Rc::new(interpret_over as cont::StackWordFunc) as Cont),
+            _ => stack.push(Rc::new(PushCont(x)) as Cont),
+        }
+    }
+
+    #[cmd(name = "<pop>", stack)]
+    fn interpret_make_pop(stack: &mut Stack) -> Result<()> {
+        let x = stack.pop_smallint_range(0, 255)?;
+        match x {
+            0 => stack.push(Rc::new(interpret_drop as cont::StackWordFunc) as Cont),
+            1 => stack.push(Rc::new(interpret_nip as cont::StackWordFunc) as Cont),
+            _ => stack.push(Rc::new(PopCont(x)) as Cont),
+        }
+    }
+}
+
+struct XchgCont {
+    x: u32,
+    y: u32,
+}
+
+impl cont::ContImpl for XchgCont {
+    fn run(self: Rc<Self>, ctx: &mut Context) -> Result<Option<Cont>> {
+        ctx.stack.swap(self.x as usize, self.y as usize)?;
+        Ok(None)
+    }
+
+    fn fmt_name(&self, _: &Dictionary, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "<xchg {} {}>", self.x, self.y)
+    }
+}
+
+struct PushCont(u32);
+
+impl cont::ContImpl for PushCont {
+    fn run(self: Rc<Self>, ctx: &mut Context) -> Result<Option<Cont>> {
+        let item = ctx.stack.fetch(self.0 as usize)?;
+        ctx.stack.push_raw(item)?;
+        Ok(None)
+    }
+
+    fn fmt_name(&self, _: &Dictionary, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "<push {}>", self.0)
+    }
+}
+
+struct PopCont(u32);
+
+impl cont::ContImpl for PopCont {
+    fn run(self: Rc<Self>, ctx: &mut Context) -> Result<Option<Cont>> {
+        ctx.stack.swap(0, self.0 as usize)?;
+        ctx.stack.pop()?;
+        Ok(None)
+    }
+
+    fn fmt_name(&self, _: &Dictionary, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "<pop {}>", self.0)
     }
 }

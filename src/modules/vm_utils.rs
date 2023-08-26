@@ -20,4 +20,15 @@ impl VmUtils {
 
         Ok(())
     }
+
+    #[cmd(name = "runvmx")]
+    #[cmd(name = "dbrunvm")]
+    #[cmd(name = "dbrunvm-parallel")]
+    #[cmd(name = "vmcont")]
+    #[cmd(name = "vmcont@")]
+    #[cmd(name = "(vmoplen)")]
+    #[cmd(name = "(vmopdump)")]
+    fn interpret_run_vm(_ctx: &mut Context) -> Result<()> {
+        anyhow::bail!("Unimplemented");
+    }
 }
