@@ -72,5 +72,5 @@ We welcome contributions to the project! If you notice any issues or errors, fee
 
   at your option.
 
-* The `fift-cli` binary crate is licensed under
+* The `fift-cli` and `fift-libs` crates are licensed under
   * GNU Lesser General Public License v2.1 ([/cli/LICENSE](./cli/LICENSE) or <https://www.gnu.org/licenses/old-licenses/lgpl-2.1.html>)
