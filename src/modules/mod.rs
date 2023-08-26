@@ -170,6 +170,19 @@ impl FiftModule for BaseModule {
         stack.push_raw(tuple)
     }
 
+    #[cmd(name = "[]!", stack)] // []! (t v i -- t')
+    fn interpret_tuple_insert(stack: &mut Stack) -> Result<()> {
+        let idx = stack.pop_usize()?;
+        let value = stack.pop()?;
+        let mut tuple = stack.pop_tuple()?;
+        
+        let l = tuple.len();
+        anyhow::ensure!(idx <= l, format!("insertion index (is {idx}) should be <= len (is {l})"));
+
+        Rc::make_mut(&mut tuple).insert(idx, value);
+        stack.push_raw(tuple)
+    }
+
     #[cmd(name = "[]>$", stack, args(pop_sep = false))] //  []>$   (t[S0, S1, ..., Sn]   -- S)
     #[cmd(name = "[]>$by", stack, args(pop_sep = true))] // []>$by (t[S0, S1, ..., Sn] s -- S)
     fn interpret_tuple_strings_join(stack: &mut Stack, pop_sep: bool) -> Result<()> {
