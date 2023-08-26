@@ -77,7 +77,7 @@ impl Arithmetic {
     fn interpret_div(stack: &mut Stack, r: Rounding) -> Result<()> {
         let y = stack.pop_int()?;
         let x = stack.pop_int()?;
-        stack.push(divmod(&x, &y, r).0)
+        stack.push(divmod(&x, &y, r)?.0)
     }
 
     #[cmd(name = "mod", stack, args(r = Rounding::Floor))]
@@ -86,7 +86,7 @@ impl Arithmetic {
     fn interpret_mod(stack: &mut Stack, r: Rounding) -> Result<()> {
         let y = stack.pop_int()?;
         let x = stack.pop_int()?;
-        stack.push(divmod(&x, &y, r).1)
+        stack.push(divmod(&x, &y, r)?.1)
     }
 
     #[cmd(name = "/mod", stack, args(r = Rounding::Floor))]
@@ -95,7 +95,7 @@ impl Arithmetic {
     fn interpret_divmod(stack: &mut Stack, r: Rounding) -> Result<()> {
         let y = stack.pop_int()?;
         let x = stack.pop_int()?;
-        let (q, r) = divmod(&x, &y, r);
+        let (q, r) = divmod(&x, &y, r)?;
         stack.push(q)?;
         stack.push(r)
     }
@@ -108,7 +108,7 @@ impl Arithmetic {
         let y = stack.pop_int()?;
         let mut x = stack.pop_int()?;
         *Rc::make_mut(&mut x) *= y.as_ref();
-        stack.push(divmod(&x, &z, r).0)
+        stack.push(divmod(&x, &z, r)?.0)
     }
 
     #[cmd(name = "*/mod", stack, args(r = Rounding::Floor))]
@@ -119,7 +119,7 @@ impl Arithmetic {
         let y = stack.pop_int()?;
         let mut x = stack.pop_int()?;
         *Rc::make_mut(&mut x) *= y.as_ref();
-        let (q, r) = divmod(&x, &z, r);
+        let (q, r) = divmod(&x, &z, r)?;
         stack.push(q)?;
         stack.push(r)
     }
@@ -130,7 +130,7 @@ impl Arithmetic {
         let y = stack.pop_int()?;
         let mut x = stack.pop_int()?;
         *Rc::make_mut(&mut x) *= y.as_ref();
-        stack.push(divmod(&x, &z, r).1)
+        stack.push(divmod(&x, &z, r)?.1)
     }
 
     #[cmd(name = "1<<", stack, args(negate = false, minus_one = false))]
@@ -205,7 +205,7 @@ impl Arithmetic {
         let y = stack.pop_int()?;
         let mut x = stack.pop_int()?;
         *Rc::make_mut(&mut x) <<= z;
-        stack.push(divmod(&x, &y, r).0)
+        stack.push(divmod(&x, &y, r)?.0)
     }
 
     // TODO: mul shift, shift div
@@ -298,8 +298,9 @@ enum Rounding {
 // https://github.com/tonlabs/ever-vm/blob/master/src/stack/integer/math.rs
 
 #[inline]
-fn divmod(lhs: &BigInt, rhs: &BigInt, rounding: Rounding) -> (BigInt, BigInt) {
-    match rounding {
+fn divmod(lhs: &BigInt, rhs: &BigInt, rounding: Rounding) -> Result<(BigInt, BigInt)> {
+    anyhow::ensure!(!rhs.is_zero(), "Division by zero");
+    Ok(match rounding {
         Rounding::Floor => lhs.div_mod_floor(rhs),
         Rounding::Nearest => {
             let (mut q, mut r) = lhs.div_rem(rhs);
@@ -311,7 +312,7 @@ fn divmod(lhs: &BigInt, rhs: &BigInt, rounding: Rounding) -> (BigInt, BigInt) {
             round_ceil(&mut q, &mut r, lhs, rhs);
             (q, r)
         }
-    }
+    })
 }
 
 #[inline]
