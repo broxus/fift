@@ -169,7 +169,9 @@ fn find_command_args(function: &syn::ImplItemFn) -> Result<Vec<String>, Error> {
 
     let mut args = Vec::new();
     for input in inputs {
-        let syn::FnArg::Typed(input) = input else { continue };
+        let syn::FnArg::Typed(input) = input else {
+            continue;
+        };
         let syn::Pat::Ident(pat) = &*input.pat else {
             return Err(Error::custom("Unsupported argument binding").with_span(&input.pat));
         };
