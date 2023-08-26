@@ -136,19 +136,27 @@ fn process_cmd_definition(
         None => {
             quote! { #function_name }
         }
-        Some(provided_args) => {
+        Some(mut provided_args) => {
             let ctx_arg = quote::format_ident!("__c");
             let required_args = find_command_args(function)?;
 
             let mut errors = Vec::new();
             let mut closure_args = vec![quote! { #ctx_arg }];
             for arg in required_args {
-                match provided_args.get(&arg) {
+                match provided_args.remove(&arg) {
                     Some(value) => closure_args.push(quote! { #value }),
                     None => errors.push(Error::custom(format!(
                         "No value provided for the argument `{arg}`"
                     ))),
                 }
+            }
+
+            for arg in provided_args.into_keys() {
+                errors.push(Error::custom(format!("Unknown function argument `{arg}`")));
+            }
+
+            if !errors.is_empty() {
+                return Err(Error::multiple(errors).with_span(&attr));
             }
 
             quote! { |#ctx_arg| #function_name(#(#closure_args),*)  }

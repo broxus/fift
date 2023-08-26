@@ -72,7 +72,7 @@ jobs:
       - name: Build and upload binary
         uses: taiki-e/upload-rust-binary-action@v1
         with:
-          bin: fift
+          bin: fift-cli
           target: ${{ matrix.target }}
           build_tool: ${{ matrix.build_tool }}
           token: ${{ secrets.GITHUB_TOKEN }}
