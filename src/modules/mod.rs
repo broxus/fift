@@ -175,9 +175,12 @@ impl FiftModule for BaseModule {
         let idx = stack.pop_usize()?;
         let value = stack.pop()?;
         let mut tuple = stack.pop_tuple()?;
-        
+
         let l = tuple.len();
-        anyhow::ensure!(idx <= l, format!("insertion index (is {idx}) should be <= len (is {l})"));
+        anyhow::ensure!(
+            idx <= l,
+            format!("insertion index (is {idx}) should be <= len (is {l})")
+        );
 
         Rc::make_mut(&mut tuple).insert(idx, value);
         stack.push_raw(tuple)
