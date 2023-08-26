@@ -1,0 +1,79 @@
+name: release
+
+on:
+  push:
+    tags:
+      - v[0-9]+.*
+
+jobs:
+  create-release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: taiki-e/create-gh-release-action@v1
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+  upload-assets:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: macos-latest, target: x86_64-apple-darwin, build_tool: cargo }
+          - {
+              os: macos-latest,
+              target: x86_64h-apple-darwin,
+              build_tool: cargo,
+            }
+          - {
+              os: macos-latest,
+              target: aarch64-apple-darwin,
+              build_tool: cargo,
+            }
+          - {
+              os: ubuntu-latest,
+              target: x86_64-unknown-linux-gnu.2.17,
+              build_tool: cargo-zigbuild,
+            }
+          - {
+              os: ubuntu-latest,
+              target: aarch64-unknown-linux-gnu.2.17,
+              build_tool: cargo-zigbuild,
+            }
+          - {
+              os: ubuntu-latest,
+              target: x86_64-unknown-linux-musl,
+              build_tool: cargo-zigbuild,
+            }
+          - {
+              os: ubuntu-latest,
+              target: aarch64-unknown-linux-musl,
+              build_tool: cargo-zigbuild,
+            }
+          - {
+              os: windows-latest,
+              target: x86_64-pc-windows-msvc,
+              build_tool: cargo,
+            }
+          - {
+              os: windows-latest,
+              target: aarch64-pc-windows-msvc,
+              build_tool: cargo,
+            }
+
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build and upload binary
+        uses: taiki-e/upload-rust-binary-action@v1
+        with:
+          bin: fift
+          target: ${{ matrix.target }}
+          build_tool: ${{ matrix.build_tool }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+          checksum: sha512
