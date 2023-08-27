@@ -120,7 +120,7 @@ impl ContImpl for InterpreterCont {
                         while !word.is_empty() {
                             word.pop();
                             if let Some(entry) = ctx.dicts.lookup(&word, false)? {
-                                rewind = Some(token.len() - word.len());
+                                rewind = Some(word.len());
                                 return Ok(Some(entry));
                             }
                         }
@@ -148,7 +148,7 @@ impl ContImpl for InterpreterCont {
                 if let Some(rewind) = rewind {
                     ctx.input.rewind(rewind);
                 } else {
-                    ctx.input.scan_skip_whitespace()?;
+                    ctx.input.skip_line_whitespace();
                 }
 
                 if entry.active {

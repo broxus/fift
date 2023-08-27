@@ -240,7 +240,6 @@ impl Control {
 
             // Search parsed token as a separate word first
             if let Some(entry) = ctx.dicts.lookup(&word, false)? {
-                //ctx.input.scan_skip_whitespace()?;
                 break 'entry (word, Some(entry));
             }
 
@@ -248,7 +247,7 @@ impl Control {
             while !word.is_empty() {
                 word.pop();
                 if let Some(entry) = ctx.dicts.lookup(&word, false)? {
-                    rewind = Some(token.len() - word.len());
+                    rewind = Some(word.len());
                     break 'entry (word, Some(entry));
                 }
             }
@@ -260,12 +259,10 @@ impl Control {
             (word, None)
         };
 
-        println!("(WORD): |{word}|");
-
         if let Some(rewind) = rewind {
             ctx.input.rewind(rewind);
         } else {
-            ctx.input.scan_skip_whitespace()?;
+            ctx.input.skip_line_whitespace();
         }
 
         match entry {
@@ -285,8 +282,6 @@ impl Control {
         // NOTE: same as `:`, but not active
         let cont = ctx.stack.pop_cont()?;
         let word = ctx.input.scan_word()?.ok_or(UnexpectedEof)?.to_owned();
-
-        println!("CREATE: |{word}|");
 
         define_word(
             &mut ctx.dicts.current,
@@ -313,8 +308,6 @@ impl Control {
         };
         let word = ctx.stack.pop_string_owned()?;
         let cont = ctx.stack.pop_cont_owned()?;
-        println!("(CREATE): |{word}|");
-
         define_word(&mut ctx.dicts.current, word, cont, mode)
     }
 

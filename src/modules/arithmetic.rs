@@ -177,8 +177,7 @@ impl Arithmetic {
         match r {
             Rounding::Floor => *Rc::make_mut(&mut x) >>= y,
             // TODO
-            Rounding::Nearest => unimplemented!(),
-            Rounding::Ceil => unimplemented!(),
+            _ => anyhow::bail!("Unimplemented"),
         }
         stack.push_raw(x)
     }

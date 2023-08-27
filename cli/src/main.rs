@@ -158,8 +158,10 @@ where
         let line_number = style(line_number).blue().bold();
 
         let line = self.pos.line.trim_end();
-        let (line_start, rest) = line.split_at(self.pos.word_start);
-        let (underlined, line_end) = rest.split_at(self.pos.word_end - self.pos.word_start);
+        let word_start = std::cmp::min(self.pos.word_start, line.len());
+        let word_end = std::cmp::min(self.pos.word_end, line.len());
+        let (line_start, rest) = line.split_at(word_start);
+        let (underlined, line_end) = rest.split_at(word_end - word_start);
 
         let line_start_len = line_start.len();
         let underlined_len = underlined.len();
