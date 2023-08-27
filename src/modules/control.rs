@@ -227,7 +227,7 @@ impl Control {
 
     #[cmd(name = "(word-prefix-find)")]
     fn interpret_word_prefix_find(ctx: &mut Context) -> Result<()> {
-        let mut rewind = 0;
+        let mut rewind = None;
         let (word, entry) = 'entry: {
             let Some(token) = ctx.input.scan_word()? else {
                 ctx.stack.push(String::new())?;
@@ -240,7 +240,6 @@ impl Control {
 
             // Search parsed token as a separate word first
             if let Some(entry) = ctx.dicts.lookup(&word, false)? {
-                //ctx.input.scan_skip_whitespace()?;
                 break 'entry (word, Some(entry));
             }
 
@@ -248,7 +247,7 @@ impl Control {
             while !word.is_empty() {
                 word.pop();
                 if let Some(entry) = ctx.dicts.lookup(&word, false)? {
-                    rewind = token.len() - word.len();
+                    rewind = Some(word.len());
                     break 'entry (word, Some(entry));
                 }
             }
@@ -259,7 +258,12 @@ impl Control {
             //ctx.input.scan_skip_whitespace()?;
             (word, None)
         };
-        ctx.input.rewind(rewind);
+
+        if let Some(rewind) = rewind {
+            ctx.input.rewind(rewind);
+        } else {
+            ctx.input.skip_line_whitespace();
+        }
 
         match entry {
             None => {

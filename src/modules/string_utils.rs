@@ -18,7 +18,7 @@ pub struct StringUtils;
 impl StringUtils {
     #[cmd(name = "\"", active, without_space)]
     fn interpret_quote_str(ctx: &mut Context) -> Result<()> {
-        let word = ctx.input.scan_until('"')?;
+        let word = ctx.input.scan_until_delimiter('"')?;
         ctx.stack.push(word.to_owned())?;
         ctx.stack.push_argcount(1)
     }

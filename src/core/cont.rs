@@ -95,7 +95,7 @@ impl ContImpl for InterpreterCont {
 
         'source_block: loop {
             'token: {
-                let mut rewind = 0;
+                let mut rewind = None;
                 let entry = 'entry: {
                     let Some(token) = ctx.input.scan_word()? else {
                         if ctx.input.pop_source_block() {
@@ -120,7 +120,7 @@ impl ContImpl for InterpreterCont {
                         while !word.is_empty() {
                             word.pop();
                             if let Some(entry) = ctx.dicts.lookup(&word, false)? {
-                                rewind = token.len() - word.len();
+                                rewind = Some(word.len());
                                 return Ok(Some(entry));
                             }
                         }
@@ -144,7 +144,12 @@ impl ContImpl for InterpreterCont {
 
                     anyhow::bail!("Undefined word `{token}`");
                 };
-                ctx.input.rewind(rewind);
+
+                if let Some(rewind) = rewind {
+                    ctx.input.rewind(rewind);
+                } else {
+                    ctx.input.skip_line_whitespace();
+                }
 
                 if entry.active {
                     ctx.next = SeqCont::make(

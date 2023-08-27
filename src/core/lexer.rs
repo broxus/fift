@@ -28,8 +28,8 @@ impl Lexer {
             offset,
             source_block_name: input.block.name(),
             line: &input.line,
-            word_start: std::cmp::min(input.prev_line_offset, input.line_offset),
-            word_end: input.line_offset,
+            word_start: input.prev_word_start,
+            word_end: input.prev_word_end,
             line_number: input.line_number,
         })
     }
@@ -55,13 +55,7 @@ impl Lexer {
     }
 
     pub fn scan_until_delimiter(&mut self, delimiter: char) -> Result<&str> {
-        if let Some(token) = self.use_last_block()?.scan_until(delimiter)? {
-            Ok(token)
-        } else if delimiter as u32 == 0 {
-            Ok("")
-        } else {
-            anyhow::bail!(UnexpectedEof)
-        }
+        self.use_last_block()?.scan_until(delimiter)
     }
 
     pub fn scan_classify(&mut self, delims: &str, space_class: u8) -> Result<&str> {
@@ -72,47 +66,29 @@ impl Lexer {
         input.scan_classify(&classifier)
     }
 
-    pub fn scan_until<P: Delimiter>(&mut self, p: P) -> Result<&str> {
-        if let Some(token) = self.use_last_block()?.scan_until(p)? {
-            Ok(token)
-        } else {
-            anyhow::bail!(UnexpectedEof)
-        }
-    }
-
-    pub fn rewind(&mut self, offset: usize) {
+    pub fn rewind(&mut self, last_word_len: usize) {
         if let Some(input) = self.blocks.last_mut() {
-            input.rewind(offset)
+            input.rewind(last_word_len)
         }
     }
 
     pub fn scan_skip_whitespace(&mut self) -> Result<bool> {
         if let Some(input) = self.blocks.last_mut() {
-            input.skip_whitespace()
+            input.scan_skip_whitespace()
         } else {
             Ok(false)
         }
     }
 
     pub fn skip_line_whitespace(&mut self) {
-        self.skip_while(char::is_whitespace)
-    }
-
-    pub fn skip_until<P: Delimiter>(&mut self, mut p: P) {
         if let Some(input) = self.blocks.last_mut() {
-            input.skip_until(|c| !p.delim(c))
+            input.skip_line_whitespace();
         }
     }
 
     pub fn skip_symbol(&mut self) {
         if let Some(input) = self.blocks.last_mut() {
             input.skip_symbol();
-        }
-    }
-
-    pub fn skip_while<P: Delimiter>(&mut self, p: P) {
-        if let Some(input) = self.blocks.last_mut() {
-            input.skip_while(p)
         }
     }
 
@@ -133,11 +109,16 @@ pub struct LexerPosition<'a> {
 
 pub trait Delimiter {
     fn delim(&mut self, c: char) -> bool;
+    fn is_eof(&self) -> bool;
 }
 
 impl<T: FnMut(char) -> bool> Delimiter for T {
     fn delim(&mut self, c: char) -> bool {
         (self)(c)
+    }
+
+    fn is_eof(&self) -> bool {
+        false
     }
 }
 
@@ -146,13 +127,19 @@ impl Delimiter for char {
     fn delim(&mut self, c: char) -> bool {
         *self == c
     }
+
+    fn is_eof(&self) -> bool {
+        *self as u32 == 0
+    }
 }
 
 struct SourceBlockState {
     block: SourceBlock,
     line: String,
+    require_next_line: bool,
     line_offset: usize,
-    prev_line_offset: usize,
+    prev_word_start: usize,
+    prev_word_end: usize,
     line_number: usize,
 }
 
@@ -161,8 +148,10 @@ impl From<SourceBlock> for SourceBlockState {
         Self {
             block,
             line: Default::default(),
+            require_next_line: true,
             line_offset: 0,
-            prev_line_offset: 0,
+            prev_word_start: 0,
+            prev_word_end: 0,
             line_number: 0,
         }
     }
@@ -171,58 +160,58 @@ impl From<SourceBlock> for SourceBlockState {
 impl SourceBlockState {
     fn scan_word(&mut self) -> Result<Option<&str>> {
         loop {
-            if (self.line.is_empty() || self.line_offset >= self.line.len()) && !self.read_line()? {
+            if !self.scan_skip_whitespace()? {
                 return Ok(None);
             }
 
-            self.skip_line_whitespace();
-            self.prev_line_offset = self.line_offset;
-
             let start = self.line_offset;
+            self.prev_word_start = start;
+
             self.skip_until(char::is_whitespace);
             let end = self.line_offset;
+            self.prev_word_end = end;
 
-            if start == end {
-                continue;
+            self.skip_line_whitespace();
+
+            if start != end {
+                return Ok(Some(&self.line[start..end]));
             }
-
-            return Ok(Some(&self.line[start..end]));
         }
     }
 
-    fn scan_until<P: Delimiter>(&mut self, mut p: P) -> Result<Option<&str>> {
-        if (self.line.is_empty() || self.line_offset >= self.line.len()) && !self.read_line()? {
-            return Ok(None);
+    fn scan_until(&mut self, c: char) -> Result<&str> {
+        if self.require_next_line {
+            self.read_line()?;
         }
 
         let start = self.line_offset;
-        self.prev_line_offset = start;
+        self.prev_word_start = start;
 
         let mut found = false;
-        self.skip_until(|c| {
-            found |= p.delim(c);
+        self.skip_until(|x| {
+            found |= x == c;
             found
         });
 
         let end = self.line_offset;
+        self.prev_word_end = self.line_offset;
 
-        Ok(if found && end >= start {
+        anyhow::ensure!(found || c as u32 == 0, "End delimiter `{c}` not found");
+
+        if found {
             self.skip_symbol();
-            Some(&self.line[start..end])
         } else {
-            None
-        })
+            self.require_next_line = true;
+        }
+
+        Ok(&self.line[start..end])
     }
 
     fn scan_classify(&mut self, classifier: &AsciiCharClassifier) -> Result<&str> {
-        if (self.line.is_empty() || self.line_offset >= self.line.len()) && !self.read_line()? {
-            return Ok("");
-        }
-
-        self.skip_whitespace()?;
+        self.scan_skip_whitespace()?;
 
         let start = self.line_offset;
-        self.prev_line_offset = start;
+        self.prev_word_start = start;
 
         let mut skip = false;
         let mut empty = true;
@@ -247,24 +236,26 @@ impl SourceBlockState {
             self.skip_symbol();
         }
 
+        self.prev_word_end = self.line_offset;
+
         Ok(&self.line[start..self.line_offset])
     }
 
-    fn rewind(&mut self, offset: usize) {
-        self.line_offset -= offset;
+    fn rewind(&mut self, last_word_len: usize) {
+        self.line_offset = self.prev_word_start + last_word_len;
+        self.prev_word_end = self.line_offset;
     }
 
-    fn skip_whitespace(&mut self) -> Result<bool> {
-        self.prev_line_offset = self.line_offset;
-
+    fn scan_skip_whitespace(&mut self) -> Result<bool> {
         loop {
-            if (self.line.is_empty() || self.line_offset >= self.line.len()) && !self.read_line()? {
-                return Ok(false);
-            }
-
             self.skip_line_whitespace();
+
             if self.line_offset < self.line.len() {
                 return Ok(true);
+            }
+
+            if (self.line.is_empty() || self.line_offset >= self.line.len()) && !self.read_line()? {
+                return Ok(false);
             }
         }
     }
@@ -296,7 +287,9 @@ impl SourceBlockState {
     fn read_line(&mut self) -> Result<bool> {
         const SKIP_PREFIX: &str = "#!";
 
-        self.prev_line_offset = 0;
+        self.require_next_line = false;
+        self.prev_word_start = 0;
+        self.prev_word_end = 0;
         self.line_offset = 0;
         self.line_number += 1;
         self.line.clear();
