@@ -133,11 +133,16 @@ pub struct LexerPosition<'a> {
 
 pub trait Delimiter {
     fn delim(&mut self, c: char) -> bool;
+    fn is_eof(&self) -> bool;
 }
 
 impl<T: FnMut(char) -> bool> Delimiter for T {
     fn delim(&mut self, c: char) -> bool {
         (self)(c)
+    }
+
+    fn is_eof(&self) -> bool {
+        false
     }
 }
 
@@ -145,6 +150,10 @@ impl Delimiter for char {
     #[inline]
     fn delim(&mut self, c: char) -> bool {
         *self == c
+    }
+
+    fn is_eof(&self) -> bool {
+        *self as u32 == 0
     }
 }
 
@@ -206,8 +215,13 @@ impl SourceBlockState {
 
         let end = self.line_offset;
 
+        let is_last = end == self.line.len() && p.is_eof();
+        found |= is_last;
+
         Ok(if found && end >= start {
-            self.skip_symbol();
+            if !is_last {
+                self.skip_symbol();
+            }
             Some(&self.line[start..end])
         } else {
             None
