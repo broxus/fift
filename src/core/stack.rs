@@ -83,6 +83,18 @@ impl Stack {
         Ok(())
     }
 
+    pub fn extend_raw<T>(&mut self, items: T) -> Result<()>
+    where
+        T: IntoIterator,
+        T::Item: Into<Rc<dyn StackValue>>,
+    {
+        for item in items {
+            self.push_raw(item.into())?;
+        }
+
+        Ok(())
+    }
+
     pub fn push_null(&mut self) -> Result<()> {
         self.push_raw(Self::make_null())
     }

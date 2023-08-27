@@ -148,6 +148,19 @@ impl FiftModule for BaseModule {
         stack.push_raw(last)
     }
 
+    #[cmd(name = "[]popn", stack)]
+    fn interpret_tuple_popn(stack: &mut Stack) -> Result<()> {
+        let n = stack.pop_usize()?;
+        let mut tuple = stack.pop_tuple()?;
+
+        let moved: Vec<_> = (0..n)
+            .map(|_| Rc::make_mut(&mut tuple).pop().context("Tuple underflow"))
+            .collect::<Result<_>>()?;
+
+        stack.push_raw(tuple)?;
+        stack.extend_raw(moved.iter().rev().cloned())
+    }
+
     #[cmd(name = "[]", stack)]
     fn interpret_tuple_index(stack: &mut Stack) -> Result<()> {
         let idx = stack.pop_usize()?;
