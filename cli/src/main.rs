@@ -4,6 +4,7 @@ use std::process::ExitCode;
 use anyhow::Result;
 use argh::FromArgs;
 use console::style;
+use unicode_width::UnicodeWidthStr;
 
 use fift::core::lexer::LexerPosition;
 use fift::core::{Environment, SourceBlock};
@@ -163,8 +164,8 @@ where
         let (line_start, rest) = line.split_at(word_start);
         let (underlined, line_end) = rest.split_at(word_end - word_start);
 
-        let line_start_len = line_start.len();
-        let underlined_len = underlined.len();
+        let line_start_len = UnicodeWidthStr::width(line_start);
+        let underlined_len = UnicodeWidthStr::width(underlined);
 
         write!(
             f,

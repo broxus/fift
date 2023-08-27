@@ -109,16 +109,11 @@ pub struct LexerPosition<'a> {
 
 pub trait Delimiter {
     fn delim(&mut self, c: char) -> bool;
-    fn is_eof(&self) -> bool;
 }
 
 impl<T: FnMut(char) -> bool> Delimiter for T {
     fn delim(&mut self, c: char) -> bool {
         (self)(c)
-    }
-
-    fn is_eof(&self) -> bool {
-        false
     }
 }
 
@@ -126,10 +121,6 @@ impl Delimiter for char {
     #[inline]
     fn delim(&mut self, c: char) -> bool {
         *self == c
-    }
-
-    fn is_eof(&self) -> bool {
-        *self as u32 == 0
     }
 }
 
