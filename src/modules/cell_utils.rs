@@ -546,7 +546,7 @@ impl<'a> StorageStat<'a> {
 
     fn add_cell(&mut self, cell: &'a DynCell) -> bool {
         if !self.visited.insert(cell.repr_hash()) {
-            return false;
+            return true;
         }
         if self.cells >= self.limit as u64 {
             return false;
