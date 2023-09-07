@@ -389,7 +389,7 @@ impl FiftModule for BaseModule {
         ctx.stack.push_int(ctx.env.now_ms() / 1000)
     }
 
-    #[cmd(name = "now_ms")]
+    #[cmd(name = "nowms")]
     fn interpret_now_ms(ctx: &mut Context) -> Result<()> {
         ctx.stack.push_int(ctx.env.now_ms())
     }

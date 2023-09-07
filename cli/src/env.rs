@@ -49,7 +49,7 @@ impl Environment for SystemEnvironment {
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
-            .as_micros() as u64
+            .as_millis() as u64
     }
 
     fn get_env(&self, name: &str) -> Option<String> {
