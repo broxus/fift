@@ -34,7 +34,7 @@ impl SystemEnvironment {
         }
 
         if let Some(lib) = fift_libs::all().get(name) {
-            return Ok(Resolved::Lib(*lib));
+            return Ok(Resolved::Lib(lib));
         }
 
         Err(std::io::Error::new(

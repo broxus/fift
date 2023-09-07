@@ -1,4 +1,8 @@
+use std::sync::atomic::{AtomicBool, Ordering};
+
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+
+static FALLBACK_TO_HELP: AtomicBool = AtomicBool::new(true);
 
 pub struct ArgsOrVersion<T>(pub T);
 
@@ -7,7 +11,7 @@ impl<T: argh::FromArgs> argh::TopLevelCommand for ArgsOrVersion<T> {}
 impl<T: argh::FromArgs> argh::FromArgs for ArgsOrVersion<T> {
     fn from_args(command_name: &[&str], args: &[&str]) -> Result<Self, argh::EarlyExit> {
         /// Also use argh for catching `--version`-only invocations
-        #[derive(argh::FromArgs)]
+        #[derive(Debug, argh::FromArgs)]
         struct Version {
             /// print version information and exit
             #[argh(switch, short = 'v')]
@@ -15,10 +19,14 @@ impl<T: argh::FromArgs> argh::FromArgs for ArgsOrVersion<T> {
         }
 
         match Version::from_args(command_name, args) {
-            Ok(v) if v.version => Err(argh::EarlyExit {
-                output: format!("{} {}", command_name.first().unwrap_or(&""), VERSION),
-                status: Ok(()),
-            }),
+            Ok(v) if v.version => {
+                FALLBACK_TO_HELP.store(false, Ordering::Release);
+
+                Err(argh::EarlyExit {
+                    output: format!("{} {}", command_name.first().unwrap_or(&""), VERSION),
+                    status: Ok(()),
+                })
+            }
             Err(exit) if exit.status.is_ok() => {
                 let help = match T::from_args(command_name, &["--help"]) {
                     Ok(_) => unreachable!(),
@@ -53,7 +61,7 @@ impl<T: argh::FromArgs, D: RestArgsDelimiter> argh::FromArgs for RestArgs<T, D> 
                 rest_args.iter().map(ToString::to_string).collect(),
                 D::default(),
             )),
-            Err(exit) if exit.status.is_ok() => {
+            Err(exit) if exit.status.is_ok() && FALLBACK_TO_HELP.load(Ordering::Acquire) => {
                 let help = match T::from_args(command_name, &["--help"]) {
                     Ok(_) => unreachable!(),
                     Err(exit) => exit.output,
