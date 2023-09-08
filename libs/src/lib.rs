@@ -50,6 +50,7 @@ define_libs!(
     "./",
     [
         asm => "Asm.fif",
+        disasm => "Disasm.fif",
         color => "Color.fif",
         fift => "Fift.fif",
         fift_ext => "FiftExt.fif",
