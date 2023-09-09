@@ -72,6 +72,7 @@ fn cp0() -> &'static DispatchTable {
         register_arith_ops(&mut t)?;
         register_cell_ops(&mut t)?;
         register_continuation_ops(&mut t)?;
+        register_dictionary_ops(&mut t)?;
         register_ton_ops(&mut t)?;
         register_codepage_ops(&mut t)?;
         Ok(t.finalize())
@@ -586,6 +587,59 @@ fn register_continuation_ops(t: &mut OpcodeTable) -> Result<()> {
     Ok(())
 }
 
+#[rustfmt::skip]
+fn register_dictionary_ops(t: &mut OpcodeTable) -> Result<()> {
+    t.add_simple(0xf400, 16, "STDICT")?;
+    t.add_simple(0xf401, 16, "SKIPDICT")?;
+    t.add_simple(0xf402, 16, "LDDICTS")?;
+    t.add_simple(0xf403, 16, "PLDDICTS")?;
+    t.add_simple(0xf404, 16, "LDDICT")?;
+    t.add_simple(0xf405, 16, "PLDDICT")?;
+    t.add_simple(0xf406, 16, "LDDICTQ")?;
+    t.add_simple(0xf407, 16, "PLDDICTQ")?;
+
+    t.add_fixed_range(0xf40a, 0xf410, 16, 3, dump_dictop("GET"))?;
+    t.add_fixed_range(0xf412, 0xf418, 16, 3, dump_dictop("SET"))?;
+    t.add_fixed_range(0xf41a, 0xf420, 16, 3, dump_dictop("SETGET"))?;
+    t.add_fixed_range(0xf422, 0xf428, 16, 3, dump_dictop("REPLACE"))?;
+    t.add_fixed_range(0xf42a, 0xf430, 16, 3, dump_dictop("REPLACEGET"))?;
+    t.add_fixed_range(0xf432, 0xf438, 16, 3, dump_dictop("ADD"))?;
+    t.add_fixed_range(0xf43a, 0xf440, 16, 3, dump_dictop("ADDGET"))?;
+
+    t.add_fixed_range(0xf441, 0xf444, 16, 2, dump_dictop2("SETB"))?;
+    t.add_fixed_range(0xf445, 0xf448, 16, 2, dump_dictop2("SETGETB"))?;
+    t.add_fixed_range(0xf449, 0xf44c, 16, 2, dump_dictop2("REPLACEB"))?;
+    t.add_fixed_range(0xf44d, 0xf450, 16, 2, dump_dictop2("REPLACEGETB"))?;
+    t.add_fixed_range(0xf451, 0xf454, 16, 2, dump_dictop2("ADDB"))?;
+    t.add_fixed_range(0xf455, 0xf458, 16, 2, dump_dictop2("ADDGETB"))?;
+    t.add_fixed_range(0xf459, 0xf45c, 16, 2, dump_dictop2("DEL"))?;
+
+    t.add_fixed_range(0xf462, 0xf468, 16, 3, dump_dictop("DELGET"))?;
+    t.add_fixed_range(0xf469, 0xf46c, 16, 2, dump_dictop2("GETOPTREF"))?;
+    t.add_fixed_range(0xf46d, 0xf470, 16, 2, dump_dictop2("SETGETOPTREF"))?;
+    t.add_simple(0xf470, 16, "PFXDICTSET")?;
+    t.add_simple(0xf471, 16, "PFXDICTREPLACE")?;
+    t.add_simple(0xf472, 16, "PFXDICTADD")?;
+    t.add_simple(0xf473, 16, "PFXDICTDEL")?;
+    t.add_fixed_range(0xf474, 0xf480, 16, 4, Box::new(dump_dictop_getnear))?;
+    t.add_fixed_range(0xf482, 0xf488, 16, 5, dump_dictop("MIN"))?;
+    t.add_fixed_range(0xf48a, 0xf490, 16, 5, dump_dictop("MAX"))?;
+    t.add_fixed_range(0xf492, 0xf498, 16, 5, dump_dictop("REMMIN"))?;
+    t.add_fixed_range(0xf49a, 0xf4a0, 16, 5, dump_dictop("REMMAX"))?;
+    t.add_fixed(0xf4a0 >> 2, 14, 2, Box::new(dump_dict_get_exec))?;
+    t.add_ext_range(0xf4a400, 0xf4a800, 24, 11, dump_push_const_dict("DICTPUSHCONST"), Box::new(compute_len_push_const_dict))?;
+    t.add_simple(0xf4a8, 16, "PFXDICTGETQ")?;
+    t.add_simple(0xf4a9, 16, "PFXDICTGET")?;
+    t.add_simple(0xf4aa, 16, "PFXDICTGETJMP")?;
+    t.add_simple(0xf4ab, 16, "PFXDICTGETEXEC")?;
+    t.add_ext_range(0xf4ac00, 0xf4b000, 24, 11, dump_push_const_dict("PFXDICTSWITCH"), Box::new(compute_len_push_const_dict))?;
+    t.add_fixed_range(0xf4b1, 0xf4b4, 16, 3, dump_subdictop2("GET"))?;
+    t.add_fixed_range(0xf4b5, 0xf4b8, 16, 3, dump_subdictop2("RPGET"))?;
+    t.add_fixed(0xf4bc >> 2, 14, 2, Box::new(dump_dict_get_exec))?;
+
+    Ok(())
+}
+
 fn register_ton_ops(t: &mut OpcodeTable) -> Result<()> {
     // Basic gas
     t.add_simple(0xf800, 16, "ACCEPT")?;
@@ -1060,13 +1114,13 @@ fn dump_2sr(prefix: &'static str) -> Box<FnDumpArgInstr> {
     })
 }
 
-fn dump_2sr_adj(adj: u32, prefix: &'static str) -> Box<FnDumpArgInstr> {
+fn dump_2sr_adj(adj: i32, prefix: &'static str) -> Box<FnDumpArgInstr> {
     Box::new(move |_, args, f| {
         write!(
             f,
             "{prefix}s{},s{}",
-            ((args >> 4) & 0xf) - ((adj >> 4) & 0xf),
-            (args & 0xf) - (adj & 0xf)
+            ((args as i32 >> 4) & 0xf) - ((adj >> 4) & 0xf),
+            (args as i32 & 0xf) - (adj & 0xf)
         )?;
         Ok(())
     })
@@ -1104,14 +1158,14 @@ fn dump_3sr(prefix: &'static str) -> Box<FnDumpArgInstr> {
     })
 }
 
-fn dump_3sr_adj(adj: u32, prefix: &'static str) -> Box<FnDumpArgInstr> {
+fn dump_3sr_adj(adj: i32, prefix: &'static str) -> Box<FnDumpArgInstr> {
     Box::new(move |_, args, f| {
         write!(
             f,
             "{prefix}s{},s{},s{}",
-            ((args >> 8) & 0xf) - ((adj >> 8) & 0xf),
-            ((args >> 4) & 0xf) - ((adj >> 4) & 0xf),
-            (args & 0xf) - (adj & 0xf)
+            ((args as i32 >> 8) & 0xf) - ((adj >> 8) & 0xf),
+            ((args as i32 >> 4) & 0xf) - ((adj >> 4) & 0xf),
+            (args as i32 & 0xf) - (adj & 0xf)
         )?;
         Ok(())
     })
@@ -1151,7 +1205,7 @@ fn write_round_mode(mode: u32, f: &mut dyn std::fmt::Write) -> Result<()> {
 }
 
 fn dump_push_tinyint4(_: &mut CellSlice<'_>, args: u32, f: &mut dyn std::fmt::Write) -> Result<()> {
-    let x = ((args + 5) & 0xf) - 5;
+    let x = ((args as i32 + 5) & 0xf) - 5;
     write!(f, "PUSHINT {x}")?;
     Ok(())
 }
@@ -1265,7 +1319,7 @@ fn dump_if_bit_jmpref(
 fn dump_setcontargs(name: &'static str) -> Box<FnDumpArgInstr> {
     Box::new(move |_, args, f| {
         let copy = (args >> 4) & 0xf;
-        let more = ((args + 1) & 0xf) - 1;
+        let more = ((args as i32 + 1) & 0xf) - 1;
         write!(f, "{name} {copy},{more}")?;
         Ok(())
     })
@@ -1282,6 +1336,91 @@ fn dump_throw_any(_: &mut CellSlice<'_>, args: u32, f: &mut dyn std::fmt::Write)
     };
     write!(f, "THROW{param}{cond}")?;
     Ok(())
+}
+
+fn dump_dictop(name: &'static str) -> Box<FnDumpArgInstr> {
+    Box::new(move |_, args, f| {
+        f.write_str("DICT")?;
+        if args & 0b100 != 0 {
+            f.write_str(if args & 0b010 != 0 { "U" } else { "I" })?;
+        }
+        f.write_str(name)?;
+        if args & 0b001 != 0 {
+            f.write_str("REF")?;
+        }
+        Ok(())
+    })
+}
+
+fn dump_dictop2(name: &'static str) -> Box<FnDumpArgInstr> {
+    Box::new(move |_, args, f| {
+        f.write_str("DICT")?;
+        if args & 0b10 != 0 {
+            f.write_str(if args & 0b01 != 0 { "U" } else { "I" })?;
+        }
+        f.write_str(name)?;
+        Ok(())
+    })
+}
+
+fn dump_subdictop2(name: &'static str) -> Box<FnDumpArgInstr> {
+    Box::new(move |_, args, f| {
+        f.write_str("SUBDICT")?;
+        if args & 0b10 != 0 {
+            f.write_str(if args & 0b01 != 0 { "U" } else { "I" })?;
+        }
+        f.write_str(name)?;
+        Ok(())
+    })
+}
+
+fn dump_dictop_getnear(
+    _: &mut CellSlice<'_>,
+    args: u32,
+    f: &mut dyn std::fmt::Write,
+) -> Result<()> {
+    let num = if args & 0b1100 != 0 {
+        "U"
+    } else if args & 0b1000 != 0 {
+        "I"
+    } else {
+        ""
+    };
+    let dir = if args & 0b0010 != 0 { "PREV" } else { "NEXT" };
+    let exact = if args & 0b0001 != 0 { "EQ" } else { "" };
+    write!(f, "DICT{num}GET{dir}{exact}")?;
+    Ok(())
+}
+
+fn dump_dict_get_exec(_: &mut CellSlice<'_>, args: u32, f: &mut dyn std::fmt::Write) -> Result<()> {
+    let sign = if args & 0b001 != 0 { "U" } else { "I" };
+    let flow = if args & 0b010 != 0 { "EXEC" } else { "JMP" };
+    let idx = if args & 0b100 != 0 { "Z" } else { "" };
+    write!(f, "DICT{sign}GET{flow}{idx}")?;
+    Ok(())
+}
+
+fn dump_push_const_dict(name: &'static str) -> Box<FnDumpInstr> {
+    Box::new(move |cs, _, bits, f| {
+        if !cs.has_remaining(bits, 1) {
+            return Ok(());
+        }
+        cs.try_advance(bits - 11, 0);
+        let slice = cs.get_prefix(1, 1);
+        cs.try_advance(1, 1);
+        let n = cs.load_uint(10)?;
+
+        write!(f, "{name} {n} (x{})", slice.display_data())?;
+        Ok(())
+    })
+}
+
+fn compute_len_push_const_dict(cs: &CellSlice<'_>, _: u32, bits: u16) -> (u16, u8) {
+    if cs.has_remaining(bits, 1) {
+        (bits, 1)
+    } else {
+        (0, 0)
+    }
 }
 
 fn dump_push_slice(
@@ -1699,7 +1838,7 @@ fn slice_trailing_zeros(slice: &CellSlice<'_>) -> Result<u16> {
     let offs = bits % 8;
     let mut res = offs;
     if offs > 0 {
-        let last = slice.get_small_uint(bits & !0b111, 8 - offs)?;
+        let last = slice.get_small_uint(bits & !0b111, offs)?;
         let c = last.trailing_zeros() as u16;
         if c < offs || res >= bits {
             return Ok(std::cmp::min(c, bits));
