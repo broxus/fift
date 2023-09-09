@@ -278,12 +278,13 @@ impl Arithmetic {
         stack.push_int(map[map_index as usize])
     }
 
-    #[cmd(name = "fits", stack)] // TODO: what to do with sign bit?
-    #[cmd(name = "ufits", stack)]
-    fn interpret_fits(stack: &mut Stack) -> Result<()> {
+    #[cmd(name = "fits", stack, args(signed = true))]
+    #[cmd(name = "ufits", stack, args(signed = false))]
+    fn interpret_fits(stack: &mut Stack, signed: bool) -> Result<()> {
         let y = stack.pop_smallint_range(0, 1023)? as u16;
         let x = stack.pop_int()?;
-        stack.push_bool(x.bits() <= y as u64)
+        let bits = x.bits() + signed as u64;
+        stack.push_bool(bits <= y as u64)
     }
 }
 
