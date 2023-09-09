@@ -41,8 +41,8 @@ impl VmUtils {
         let cs_raw = stack.pop_slice()?;
         let cs = cs_raw.apply()?;
 
-        let bit_len = cp0().compute_len(&cs).unwrap_or_default();
-        stack.push_int(bit_len)
+        let (bits, refs) = cp0().compute_len(&cs).unwrap_or_default();
+        stack.push_int(((refs as u64) << 16) | (bits as u64))
     }
 
     #[cmd(name = "(vmopdump)", stack)]
@@ -179,7 +179,14 @@ fn register_arith_ops(t: &mut OpcodeTable) -> Result<()> {
     t.add_fixed(0x7, 4, 4, Box::new(dump_push_tinyint4))?;
     t.add_fixed(0x80, 8, 8, dump_arg_prefix("PUSHINT "))?;
     t.add_fixed(0x81, 8, 16, dump_arg_prefix("PUSHINT "))?;
-    // TODO push int
+    t.add_ext_range(
+        0x82 << 5,
+        (0x82 << 5) + 31,
+        13,
+        5,
+        Box::new(dump_push_int),
+        Box::new(compute_len_push_int),
+    )?;
     t.add_fixed_range(0x8300, 0x83ff, 16, 8, dump_1c_l_add(1, "PUSHPOW2 "))?;
     t.add_simple(0x83ff, 16, "PUSHNAN")?;
     t.add_fixed(0x84, 8, 8, dump_1c_l_add(1, "PUSHPOW2DEC "))?;
@@ -306,8 +313,12 @@ fn register_arith_ops(t: &mut OpcodeTable) -> Result<()> {
     Ok(())
 }
 
-fn register_cell_ops(_t: &mut OpcodeTable) -> Result<()> {
+#[rustfmt::skip]
+fn register_cell_ops(t: &mut OpcodeTable) -> Result<()> {
     // Cell const
+    t.add_ext(0x88, 8, 0, dump_push_ref("PUSHREF"), Box::new(compute_len_push_ref))?;
+    t.add_ext(0x89, 8, 0, dump_push_ref("PUSHREFSLICE"), Box::new(compute_len_push_ref))?;
+    t.add_ext(0x8a, 8, 0, dump_push_ref("PUSHREFCONT"), Box::new(compute_len_push_ref))?;
 
     // TODO
 
@@ -406,17 +417,13 @@ impl DispatchTable {
         (opcode, bits)
     }
 
-    fn load_dump(
-        &self,
-        slice: &mut CellSlice<'_>,
-        f: &mut dyn std::fmt::Write,
-    ) -> std::fmt::Result {
+    fn load_dump(&self, slice: &mut CellSlice<'_>, f: &mut dyn std::fmt::Write) -> Result<()> {
         let (opcode, bits) = Self::get_opcode_from_slice(slice);
         let op = self.lookup(opcode);
         op.load_dump(slice, opcode, bits, f)
     }
 
-    fn compute_len(&self, slice: &CellSlice<'_>) -> Option<u16> {
+    fn compute_len(&self, slice: &CellSlice<'_>) -> Option<(u16, u8)> {
         let (opcode, bits) = Self::get_opcode_from_slice(slice);
         let op = self.lookup(opcode);
         op.compute_len(slice, opcode, bits)
@@ -523,6 +530,43 @@ impl OpcodeTable {
         }))
     }
 
+    fn add_ext(
+        &mut self,
+        opcode: u32,
+        opcode_bits: u16,
+        arg_bits: u16,
+        dump: Box<FnDumpInstr>,
+        instr_len: Box<FnComputeInstrLen>,
+    ) -> Result<()> {
+        let remaining_bits = MAX_OPCODE_BITS - opcode_bits;
+        self.add_opcode(Box::new(ExtOpcode {
+            dump,
+            instr_len,
+            opcode_min: opcode << remaining_bits,
+            opcode_max: (opcode + 1) << remaining_bits,
+            total_bits: opcode_bits + arg_bits,
+        }))
+    }
+
+    fn add_ext_range(
+        &mut self,
+        opcode_min: u32,
+        opcode_max: u32,
+        total_bits: u16,
+        _arg_bits: u16,
+        dump: Box<FnDumpInstr>,
+        instr_len: Box<FnComputeInstrLen>,
+    ) -> Result<()> {
+        let remaining_bits = MAX_OPCODE_BITS - total_bits;
+        self.add_opcode(Box::new(ExtOpcode {
+            dump,
+            instr_len,
+            opcode_min: opcode_min << remaining_bits,
+            opcode_max: opcode_max << remaining_bits,
+            total_bits,
+        }))
+    }
+
     fn add_opcode(&mut self, opcode: Box<dyn Opcode>) -> Result<()> {
         let (min, max) = opcode.range();
         debug_assert!(min < max);
@@ -556,7 +600,7 @@ const MAX_OPCODE: u32 = 1 << MAX_OPCODE_BITS;
 trait Opcode: Send + Sync {
     fn range(&self) -> (u32, u32);
 
-    fn compute_len(&self, slice: &CellSlice<'_>, opcode: u32, bits: u16) -> Option<u16>;
+    fn compute_len(&self, slice: &CellSlice<'_>, opcode: u32, bits: u16) -> Option<(u16, u8)>;
 
     fn load_dump(
         &self,
@@ -564,7 +608,7 @@ trait Opcode: Send + Sync {
         opcode: u32,
         bits: u16,
         f: &mut dyn std::fmt::Write,
-    ) -> std::fmt::Result;
+    ) -> Result<()>;
 }
 
 struct DummyOpcode {
@@ -577,7 +621,7 @@ impl Opcode for DummyOpcode {
         (self.opcode_min, self.opcode_max)
     }
 
-    fn compute_len(&self, _: &CellSlice<'_>, _: u32, _: u16) -> Option<u16> {
+    fn compute_len(&self, _: &CellSlice<'_>, _: u32, _: u16) -> Option<(u16, u8)> {
         None
     }
 
@@ -587,7 +631,7 @@ impl Opcode for DummyOpcode {
         _: u32,
         _: u16,
         _: &mut dyn std::fmt::Write,
-    ) -> std::fmt::Result {
+    ) -> Result<()> {
         Ok(())
     }
 }
@@ -604,8 +648,8 @@ impl Opcode for SimpleOpcode {
         (self.opcode_min, self.opcode_max)
     }
 
-    fn compute_len(&self, _: &CellSlice<'_>, _: u32, bits: u16) -> Option<u16> {
-        (bits >= self.bits).then_some(self.bits)
+    fn compute_len(&self, _: &CellSlice<'_>, _: u32, bits: u16) -> Option<(u16, u8)> {
+        (bits >= self.bits).then_some((self.bits, 0))
     }
 
     fn load_dump(
@@ -614,7 +658,7 @@ impl Opcode for SimpleOpcode {
         _: u32,
         bits: u16,
         f: &mut dyn std::fmt::Write,
-    ) -> std::fmt::Result {
+    ) -> Result<()> {
         if bits >= self.bits {
             slice.try_advance(self.bits, 0);
             f.write_str(self.name)?;
@@ -635,8 +679,8 @@ impl Opcode for FixedOpcode {
         (self.opcode_min, self.opcode_max)
     }
 
-    fn compute_len(&self, _: &CellSlice<'_>, _: u32, bits: u16) -> Option<u16> {
-        (bits >= self.total_bits).then_some(self.total_bits)
+    fn compute_len(&self, _: &CellSlice<'_>, _: u32, bits: u16) -> Option<(u16, u8)> {
+        (bits >= self.total_bits).then_some((self.total_bits, 0))
     }
 
     fn load_dump(
@@ -645,7 +689,7 @@ impl Opcode for FixedOpcode {
         opcode: u32,
         bits: u16,
         f: &mut dyn std::fmt::Write,
-    ) -> std::fmt::Result {
+    ) -> Result<()> {
         if bits >= self.total_bits {
             slice.try_advance(self.total_bits, 0);
             (self.dump)(slice, opcode >> (MAX_OPCODE_BITS - self.total_bits), f)?;
@@ -654,37 +698,102 @@ impl Opcode for FixedOpcode {
     }
 }
 
-type FnDumpArgInstr = dyn Fn(&CellSlice<'_>, u32, &mut dyn std::fmt::Write) -> std::fmt::Result
+struct ExtOpcode {
+    dump: Box<FnDumpInstr>,
+    instr_len: Box<FnComputeInstrLen>,
+    opcode_min: u32,
+    opcode_max: u32,
+    total_bits: u16,
+}
+
+impl Opcode for ExtOpcode {
+    fn range(&self) -> (u32, u32) {
+        (self.opcode_min, self.opcode_max)
+    }
+
+    fn compute_len(&self, slice: &CellSlice<'_>, opcode: u32, bits: u16) -> Option<(u16, u8)> {
+        if bits >= self.total_bits {
+            Some((self.instr_len)(slice, opcode, bits))
+        } else {
+            None
+        }
+    }
+
+    fn load_dump(
+        &self,
+        slice: &mut CellSlice<'_>,
+        opcode: u32,
+        bits: u16,
+        f: &mut dyn std::fmt::Write,
+    ) -> Result<()> {
+        if bits >= self.total_bits {
+            slice.try_advance(self.total_bits, 0);
+            (self.dump)(
+                slice,
+                opcode >> (MAX_OPCODE_BITS - self.total_bits),
+                self.total_bits,
+                f,
+            )?;
+        }
+        Ok(())
+    }
+}
+
+type FnDumpArgInstr =
+    dyn Fn(&mut CellSlice<'_>, u32, &mut dyn std::fmt::Write) -> Result<()> + Send + Sync + 'static;
+type FnDumpInstr = dyn Fn(&mut CellSlice<'_>, u32, u16, &mut dyn std::fmt::Write) -> Result<()>
     + Send
     + Sync
     + 'static;
+type FnComputeInstrLen = dyn Fn(&CellSlice<'_>, u32, u16) -> (u16, u8) + Send + Sync + 'static;
 
 fn dump_arg_prefix(op: &'static str) -> Box<FnDumpArgInstr> {
-    Box::new(move |_, x, f| write!(f, "{op}{x}"))
+    Box::new(move |_, x, f| {
+        write!(f, "{op}{x}")?;
+        Ok(())
+    })
 }
 
 fn dump_1sr(prefix: &'static str) -> Box<FnDumpArgInstr> {
-    Box::new(move |_, args, f| write!(f, "{prefix}s{}", args & 0xf))
+    Box::new(move |_, args, f| {
+        write!(f, "{prefix}s{}", args & 0xf)?;
+        Ok(())
+    })
 }
 
 fn dump_1sr_l(prefix: &'static str) -> Box<FnDumpArgInstr> {
-    Box::new(move |_, args, f| write!(f, "{prefix}s{}", args & 0xff))
+    Box::new(move |_, args, f| {
+        write!(f, "{prefix}s{}", args & 0xff)?;
+        Ok(())
+    })
 }
 
 fn dump_1c(prefix: &'static str) -> Box<FnDumpArgInstr> {
-    Box::new(move |_, args, f| write!(f, "{prefix}{}", args & 0xf))
+    Box::new(move |_, args, f| {
+        write!(f, "{prefix}{}", args & 0xf)?;
+        Ok(())
+    })
 }
 
 fn dump_1c_and(mask: u32, prefix: &'static str) -> Box<FnDumpArgInstr> {
-    Box::new(move |_, args, f| write!(f, "{prefix}{}", args & mask))
+    Box::new(move |_, args, f| {
+        write!(f, "{prefix}{}", args & mask)?;
+        Ok(())
+    })
 }
 
 fn dump_1c_l_add(add: i32, prefix: &'static str) -> Box<FnDumpArgInstr> {
-    Box::new(move |_, args, f| write!(f, "{prefix}{}", (args & 0xff) as i32 + add))
+    Box::new(move |_, args, f| {
+        write!(f, "{prefix}{}", (args & 0xff) as i32 + add)?;
+        Ok(())
+    })
 }
 
 fn dump_2sr(prefix: &'static str) -> Box<FnDumpArgInstr> {
-    Box::new(move |_, args, f| write!(f, "{prefix}s{},s{}", (args >> 4) & 0xf, args & 0xf))
+    Box::new(move |_, args, f| {
+        write!(f, "{prefix}s{},s{}", (args >> 4) & 0xf, args & 0xf)?;
+        Ok(())
+    })
 }
 
 fn dump_2sr_adj(adj: u32, prefix: &'static str) -> Box<FnDumpArgInstr> {
@@ -694,12 +803,16 @@ fn dump_2sr_adj(adj: u32, prefix: &'static str) -> Box<FnDumpArgInstr> {
             "{prefix}s{},s{}",
             ((args >> 4) & 0xf) - ((adj >> 4) & 0xf),
             (args & 0xf) - (adj & 0xf)
-        )
+        )?;
+        Ok(())
     })
 }
 
 fn dump_2c(prefix: &'static str, sep: &'static str) -> Box<FnDumpArgInstr> {
-    Box::new(move |_, args, f| write!(f, "{prefix}{}{sep}{}", (args >> 4) & 0xf, args & 0xf))
+    Box::new(move |_, args, f| {
+        write!(f, "{prefix}{}{sep}{}", (args >> 4) & 0xf, args & 0xf)?;
+        Ok(())
+    })
 }
 
 fn dump_2c_add(add: u32, prefix: &'static str, sep: &'static str) -> Box<FnDumpArgInstr> {
@@ -709,7 +822,8 @@ fn dump_2c_add(add: u32, prefix: &'static str, sep: &'static str) -> Box<FnDumpA
             "{prefix}{}{sep}{}",
             ((args >> 4) & 0xf) + ((add >> 4) & 0xf),
             (args & 0xf) + (add & 0xf)
-        )
+        )?;
+        Ok(())
     })
 }
 
@@ -721,7 +835,8 @@ fn dump_3sr(prefix: &'static str) -> Box<FnDumpArgInstr> {
             (args >> 8) & 0xf,
             (args >> 4) & 0xf,
             args & 0xf
-        )
+        )?;
+        Ok(())
     })
 }
 
@@ -733,56 +848,98 @@ fn dump_3sr_adj(adj: u32, prefix: &'static str) -> Box<FnDumpArgInstr> {
             ((args >> 8) & 0xf) - ((adj >> 8) & 0xf),
             ((args >> 4) & 0xf) - ((adj >> 4) & 0xf),
             (args & 0xf) - (adj & 0xf)
-        )
+        )?;
+        Ok(())
     })
 }
 
-fn dump_xchg(_: &CellSlice<'_>, args: u32, f: &mut dyn std::fmt::Write) -> std::fmt::Result {
+fn dump_xchg(_: &mut CellSlice<'_>, args: u32, f: &mut dyn std::fmt::Write) -> Result<()> {
     let x = (args >> 4) & 0xf;
     let y = args & 0xf;
     if x != 0 && x < y {
-        write!(f, "XCHG s{x},s{y}")
-    } else {
-        Ok(())
+        write!(f, "XCHG s{x},s{y}")?
     }
+    Ok(())
 }
 
-fn dump_tuple_index2(
-    _: &CellSlice<'_>,
-    args: u32,
-    f: &mut dyn std::fmt::Write,
-) -> std::fmt::Result {
+fn dump_tuple_index2(_: &mut CellSlice<'_>, args: u32, f: &mut dyn std::fmt::Write) -> Result<()> {
     let i = (args >> 2) & 0b11;
     let j = args & 0b11;
-    write!(f, "INDEX2 {i},{j}")
+    write!(f, "INDEX2 {i},{j}")?;
+    Ok(())
 }
 
-fn dump_tuple_index3(
-    _: &CellSlice<'_>,
-    args: u32,
-    f: &mut dyn std::fmt::Write,
-) -> std::fmt::Result {
+fn dump_tuple_index3(_: &mut CellSlice<'_>, args: u32, f: &mut dyn std::fmt::Write) -> Result<()> {
     let i = (args >> 4) & 0b11;
     let j = (args >> 2) & 0b11;
     let k = args & 0b11;
-    write!(f, "INDEX3 {i},{j},{k}")
+    write!(f, "INDEX3 {i},{j},{k}")?;
+    Ok(())
 }
 
-fn write_round_mode(mode: u32, f: &mut dyn std::fmt::Write) -> std::fmt::Result {
+fn write_round_mode(mode: u32, f: &mut dyn std::fmt::Write) -> Result<()> {
     f.write_str(match mode {
         0b01 => "R",
         0b10 => "C",
         _ => "",
+    })?;
+    Ok(())
+}
+
+fn dump_push_tinyint4(_: &mut CellSlice<'_>, args: u32, f: &mut dyn std::fmt::Write) -> Result<()> {
+    let x = ((args + 5) & 0xf) - 5;
+    write!(f, "PUSHINT {x}")?;
+    Ok(())
+}
+
+fn dump_push_int(
+    cs: &mut CellSlice<'_>,
+    args: u32,
+    bits: u16,
+    f: &mut dyn std::fmt::Write,
+) -> Result<()> {
+    let l = ((args & 31) + 2) as u16;
+    let value_len = 3 + l * 8;
+    if !cs.has_remaining(bits + value_len, 0) {
+        return Ok(());
+    }
+
+    cs.try_advance(bits, 0);
+
+    let mut bytes = [0u8; 33];
+    let rem = value_len % 8;
+    let mut int = num_bigint::BigUint::from_bytes_be(cs.load_raw(&mut bytes, bits)?);
+    if rem != 0 {
+        int >>= 8 - rem;
+    }
+    write!(f, "PUSHINT {int}")?;
+    Ok(())
+}
+
+fn compute_len_push_int(cs: &CellSlice<'_>, args: u32, bits: u16) -> (u16, u8) {
+    let l = ((args & 31) + 2) as u16;
+    let bit_len = bits + 3 + l * 8;
+    (bit_len * cs.has_remaining(bit_len, 0) as u16, 0)
+}
+
+fn dump_push_ref(name: &'static str) -> Box<FnDumpInstr> {
+    Box::new(move |cs, _, bits, f| {
+        if !cs.has_remaining(0, 1) {
+            return Ok(());
+        }
+        cs.try_advance(bits, 0);
+        let cell = cs.load_reference()?;
+        write!(f, "{name} ({})", cell.repr_hash())?;
+        Ok(())
     })
 }
 
-fn dump_push_tinyint4(
-    _: &CellSlice<'_>,
-    args: u32,
-    f: &mut dyn std::fmt::Write,
-) -> std::fmt::Result {
-    let x = ((args + 5) & 0xf) - 5;
-    write!(f, "PUSHINT {x}")
+fn compute_len_push_ref(cs: &CellSlice<'_>, _: u32, bits: u16) -> (u16, u8) {
+    if cs.has_remaining(0, 1) {
+        (bits, 1)
+    } else {
+        (0, 0)
+    }
 }
 
 fn dump_divmod(quiet: bool) -> Box<FnDumpArgInstr> {
