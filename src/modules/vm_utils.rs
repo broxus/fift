@@ -1190,8 +1190,10 @@ fn dump_push_slice_ext(
         return Ok(());
     }
     cs.try_advance(bits, 0);
-    let slice = cs.get_prefix(slice_bits, slice_refs);
+    let mut slice = cs.get_prefix(slice_bits, slice_refs);
     cs.try_advance(slice_bits, slice_refs);
+    slice_trim_end(&mut slice)?;
+
     write!(f, "{name} x{}", slice.display_data())?;
     if !slice.is_refs_empty() {
         write!(f, ",{}", slice.remaining_refs())?;
@@ -1469,6 +1471,57 @@ fn dump_shldivmod(has_y: bool, quiet: bool) -> Box<FnDumpArgInstr> {
         }
         Ok(())
     })
+}
+
+fn slice_trim_end(slice: &mut CellSlice<'_>) -> Result<()> {
+    let bits = slice.remaining_bits();
+    if bits == 0 {
+        return Ok(());
+    }
+    let mut trailing = slice_trailing_zeros(slice)?;
+    if bits != trailing {
+        trailing = trailing.saturating_add(1);
+    }
+    *slice = slice.get_prefix(bits - trailing, slice.remaining_refs());
+    Ok(())
+}
+
+fn slice_trailing_zeros(slice: &CellSlice<'_>) -> Result<u16> {
+    let mut bits = slice.remaining_bits();
+    if bits == 0 {
+        return Ok(0);
+    }
+
+    let offs = bits % 8;
+    let mut res = offs;
+    if offs > 0 {
+        let last = slice.get_small_uint(bits & !0b111, 8 - offs)?;
+        let c = last.trailing_zeros() as u16;
+        if c < offs || res >= bits {
+            return Ok(std::cmp::min(c, bits));
+        }
+    }
+
+    bits -= offs;
+    while bits >= 32 {
+        bits -= 32;
+        let v = slice.get_u32(bits)?;
+        if v != 0 {
+            return Ok(res + v.trailing_zeros() as u16);
+        }
+        res += 32;
+    }
+
+    while bits >= 8 {
+        bits -= 8;
+        let v = slice.get_u8(bits)?;
+        if v != 0 {
+            return Ok(res + v.trailing_zeros() as u16);
+        }
+        res += 8;
+    }
+
+    Ok(res)
 }
 
 #[cfg(test)]
