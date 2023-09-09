@@ -177,8 +177,8 @@ fn register_tuple_ops(t: &mut OpcodeTable) -> Result<()> {
 fn register_arith_ops(t: &mut OpcodeTable) -> Result<()> {
     // Int const:
     t.add_fixed(0x7, 4, 4, Box::new(dump_push_tinyint4))?;
-    t.add_fixed(0x80, 8, 8, dump_arg_prefix("PUSHINT "))?;
-    t.add_fixed(0x81, 8, 16, dump_arg_prefix("PUSHINT "))?;
+    t.add_fixed(0x80, 8, 8, dump_op_tinyint8("PUSHINT "))?;
+    t.add_fixed(0x81, 8, 16, Box::new(dump_push_smallint))?;
     t.add_ext_range(
         0x82 << 5,
         (0x82 << 5) + 31,
@@ -199,8 +199,8 @@ fn register_arith_ops(t: &mut OpcodeTable) -> Result<()> {
     t.add_simple(0xa3, 8, "NEGATE")?;
     t.add_simple(0xa4, 8, "INC")?;
     t.add_simple(0xa5, 8, "DEC")?;
-    t.add_fixed(0xa6, 8, 8, dump_arg_prefix("ADDINT "))?;
-    t.add_fixed(0xa7, 8, 8, dump_arg_prefix("MULINT "))?;
+    t.add_fixed(0xa6, 8, 8, dump_op_tinyint8("ADDINT "))?;
+    t.add_fixed(0xa7, 8, 8, dump_op_tinyint8("MULINT "))?;
     t.add_simple(0xa8, 8, "MUL")?;
 
     // Quiet add/mul
@@ -210,8 +210,8 @@ fn register_arith_ops(t: &mut OpcodeTable) -> Result<()> {
     t.add_simple(0xb7a3, 16, "QNEGATE")?;
     t.add_simple(0xb7a4, 16, "QINC")?;
     t.add_simple(0xb7a5, 16, "QDEC")?;
-    t.add_fixed(0xb7a6, 16, 8, dump_arg_prefix("QADDINT "))?;
-    t.add_fixed(0xb7a7, 16, 8, dump_arg_prefix("QMULINT "))?;
+    t.add_fixed(0xb7a6, 16, 8, dump_op_tinyint8("QADDINT "))?;
+    t.add_fixed(0xb7a7, 16, 8, dump_op_tinyint8("QMULINT "))?;
     t.add_simple(0xb7a8, 16, "QMUL")?;
 
     // Div
@@ -289,10 +289,10 @@ fn register_arith_ops(t: &mut OpcodeTable) -> Result<()> {
     t.add_simple(0xbd, 8, "NEQ")?;
     t.add_simple(0xbe, 8, "GEQ")?;
     t.add_simple(0xbf, 8, "CMP")?;
-    t.add_fixed(0xc0, 8, 8, dump_arg_prefix("EQINT "))?;
-    t.add_fixed(0xc1, 8, 8, dump_arg_prefix("LESSINT "))?;
-    t.add_fixed(0xc2, 8, 8, dump_arg_prefix("GTINT "))?;
-    t.add_fixed(0xc3, 8, 8, dump_arg_prefix("NEQINT "))?;
+    t.add_fixed(0xc0, 8, 8, dump_op_tinyint8("EQINT "))?;
+    t.add_fixed(0xc1, 8, 8, dump_op_tinyint8("LESSINT "))?;
+    t.add_fixed(0xc2, 8, 8, dump_op_tinyint8("GTINT "))?;
+    t.add_fixed(0xc3, 8, 8, dump_op_tinyint8("NEQINT "))?;
     t.add_simple(0xc4, 8, "ISNAN")?;
     t.add_simple(0xc5, 8, "CHKNAN")?;
 
@@ -305,10 +305,10 @@ fn register_arith_ops(t: &mut OpcodeTable) -> Result<()> {
     t.add_simple(0xb7bd, 16, "QNEQ")?;
     t.add_simple(0xb7be, 16, "QGEQ")?;
     t.add_simple(0xb7bf, 16, "QCMP")?;
-    t.add_fixed(0xb7c0, 16, 8, dump_arg_prefix("QEQINT "))?;
-    t.add_fixed(0xb7c1, 16, 8, dump_arg_prefix("QLESSINT "))?;
-    t.add_fixed(0xb7c2, 16, 8, dump_arg_prefix("QGTINT "))?;
-    t.add_fixed(0xb7c3, 16, 8, dump_arg_prefix("QNEQINT "))?;
+    t.add_fixed(0xb7c0, 16, 8, dump_op_tinyint8("QEQINT "))?;
+    t.add_fixed(0xb7c1, 16, 8, dump_op_tinyint8("QLESSINT "))?;
+    t.add_fixed(0xb7c2, 16, 8, dump_op_tinyint8("QGTINT "))?;
+    t.add_fixed(0xb7c3, 16, 8, dump_op_tinyint8("QNEQINT "))?;
 
     Ok(())
 }
@@ -329,7 +329,7 @@ fn register_cell_ops(t: &mut OpcodeTable) -> Result<()> {
     t.add_simple(0xc700, 16, "SEMPTY")?;
     t.add_simple(0xc701, 16, "SDEMPTY")?;
     t.add_simple(0xc702, 16, "SREMPTY")?;
-    t.add_simple(0xc704, 16, "SDFIRST")?;
+    t.add_simple(0xc703, 16, "SDFIRST")?;
     t.add_simple(0xc704, 16, "SDLEXCMP")?;
     t.add_simple(0xc705, 16, "SDEQ")?;
 
@@ -841,7 +841,11 @@ impl Opcode for ExtOpcode {
 
     fn compute_len(&self, slice: &CellSlice<'_>, opcode: u32, bits: u16) -> Option<(u16, u8)> {
         if bits >= self.total_bits {
-            Some((self.instr_len)(slice, opcode, bits))
+            Some((self.instr_len)(
+                slice,
+                opcode >> (MAX_OPCODE_BITS - self.total_bits),
+                self.total_bits,
+            ))
         } else {
             None
         }
@@ -855,7 +859,6 @@ impl Opcode for ExtOpcode {
         f: &mut dyn std::fmt::Write,
     ) -> Result<()> {
         if bits >= self.total_bits {
-            slice.try_advance(self.total_bits, 0);
             (self.dump)(
                 slice,
                 opcode >> (MAX_OPCODE_BITS - self.total_bits),
@@ -874,13 +877,6 @@ type FnDumpInstr = dyn Fn(&mut CellSlice<'_>, u32, u16, &mut dyn std::fmt::Write
     + Sync
     + 'static;
 type FnComputeInstrLen = dyn Fn(&CellSlice<'_>, u32, u16) -> (u16, u8) + Send + Sync + 'static;
-
-fn dump_arg_prefix(op: &'static str) -> Box<FnDumpArgInstr> {
-    Box::new(move |_, x, f| {
-        write!(f, "{op}{x}")?;
-        Ok(())
-    })
-}
 
 fn dump_1sr(prefix: &'static str) -> Box<FnDumpArgInstr> {
     Box::new(move |_, args, f| {
@@ -1020,6 +1016,20 @@ fn dump_push_tinyint4(_: &mut CellSlice<'_>, args: u32, f: &mut dyn std::fmt::Wr
     Ok(())
 }
 
+fn dump_op_tinyint8(name: &'static str) -> Box<FnDumpArgInstr> {
+    Box::new(move |_, args, f| {
+        let x = args as i8;
+        write!(f, "{name}{x}")?;
+        Ok(())
+    })
+}
+
+fn dump_push_smallint(_: &mut CellSlice<'_>, args: u32, f: &mut dyn std::fmt::Write) -> Result<()> {
+    let x = args as i16;
+    write!(f, "PUSHINT {x}")?;
+    Ok(())
+}
+
 fn dump_push_int(
     cs: &mut CellSlice<'_>,
     args: u32,
@@ -1036,7 +1046,7 @@ fn dump_push_int(
 
     let mut bytes = [0u8; 33];
     let rem = value_len % 8;
-    let mut int = num_bigint::BigUint::from_bytes_be(cs.load_raw(&mut bytes, bits)?);
+    let mut int = num_bigint::BigUint::from_bytes_be(cs.load_raw(&mut bytes, value_len)?);
     if rem != 0 {
         int >>= 8 - rem;
     }
@@ -1365,12 +1375,12 @@ fn dump_divmod(quiet: bool) -> Box<FnDumpArgInstr> {
 
 fn dump_shrmod(has_y: bool, quiet: bool) -> Box<FnDumpArgInstr> {
     Box::new(move |_, mut args, f| {
-        let round_mode = args & 0b11;
         let mut y = 0;
         if has_y {
             y = (args & 0xff) + 1;
             args >>= 8;
         }
+        let round_mode = args & 0b11;
         if args & 0b1100 != 0 && round_mode < 3 {
             if quiet {
                 f.write_str("Q")?;
@@ -1408,12 +1418,12 @@ fn dump_muldivmod(quiet: bool) -> Box<FnDumpArgInstr> {
 
 fn dump_mulshrmod(has_y: bool, quiet: bool) -> Box<FnDumpArgInstr> {
     Box::new(move |_, mut args, f| {
-        let round_mode = args & 0b11;
         let mut y = 0;
         if has_y {
             y = (args & 0xff) + 1;
             args >>= 8;
         }
+        let round_mode = args & 0b11;
         if args & 0b1100 != 0 && round_mode < 3 {
             if quiet {
                 f.write_str("Q")?;
@@ -1434,12 +1444,12 @@ fn dump_mulshrmod(has_y: bool, quiet: bool) -> Box<FnDumpArgInstr> {
 
 fn dump_shldivmod(has_y: bool, quiet: bool) -> Box<FnDumpArgInstr> {
     Box::new(move |_, mut args, f| {
-        let round_mode = args & 0b11;
         let mut y = 0;
         if has_y {
             y = (args & 0xff) + 1;
             args >>= 8;
         }
+        let round_mode = args & 0b11;
         if args & 0b1100 != 0 && round_mode < 3 {
             if quiet {
                 f.write_str("Q")?;
