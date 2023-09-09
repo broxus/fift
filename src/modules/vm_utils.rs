@@ -74,6 +74,7 @@ fn cp0() -> &'static DispatchTable {
         register_continuation_ops(&mut t)?;
         register_dictionary_ops(&mut t)?;
         register_ton_ops(&mut t)?;
+        register_debug_ops(&mut t)?;
         register_codepage_ops(&mut t)?;
         Ok(t.finalize())
     }
@@ -644,6 +645,10 @@ fn register_ton_ops(t: &mut OpcodeTable) -> Result<()> {
     // Basic gas
     t.add_simple(0xf800, 16, "ACCEPT")?;
     t.add_simple(0xf801, 16, "SETGASLIMIT")?;
+    t.add_simple(0xf802, 16, "BUYGAS")?;
+    t.add_simple(0xf804, 16, "GRAMTOGAS")?;
+    t.add_simple(0xf805, 16, "GASTOGRAM")?;
+    t.add_simple(0xf806, 16, "GASREMAINING")?;
     t.add_simple(0xf80f, 16, "COMMIT")?;
 
     // PRNG
@@ -661,7 +666,11 @@ fn register_ton_ops(t: &mut OpcodeTable) -> Result<()> {
     t.add_simple(0xf827, 16, "BALANCE")?;
     t.add_simple(0xf828, 16, "MYADDR")?;
     t.add_simple(0xf829, 16, "CONFIGROOT")?;
-    t.add_fixed_range(0xf82a, 0xf830, 16, 4, dump_1c("GETPARAM "))?;
+    t.add_simple(0xf82a, 16, "MYCODE")?;
+    t.add_simple(0xf82b, 16, "INITCODEHASH")?;
+    t.add_simple(0xf82c, 16, "STORAGEFEE")?;
+    t.add_simple(0xf82d, 16, "SEQNO")?;
+    t.add_fixed_range(0xf82e, 0xf830, 16, 4, dump_1c("GETPARAM "))?;
     t.add_simple(0xf830, 16, "CONFIGDICT")?;
     t.add_simple(0xf832, 16, "CONFIGPARAM")?;
     t.add_simple(0xf833, 16, "CONFIGOPTPARAM")?;
@@ -709,6 +718,14 @@ fn register_ton_ops(t: &mut OpcodeTable) -> Result<()> {
     t.add_simple(0xfb04, 16, "SETCODE")?;
     t.add_simple(0xfb06, 16, "SETLIBCODE")?;
     t.add_simple(0xfb07, 16, "CHANGELIB")?;
+
+    Ok(())
+}
+
+#[rustfmt::skip]
+fn register_debug_ops(t: &mut OpcodeTable) -> Result<()> {
+    t.add_fixed_range(0xfe00, 0xfef0, 16, 8, dump_1c_and(0xff, "DEBUG "))?;
+    t.add_ext(0xfef, 12, 4, Box::new(dump_dummy_debug_str), Box::new(compute_len_debug_str))?;
 
     Ok(())
 }
@@ -1552,6 +1569,33 @@ fn compute_len_push_slice_ext(cs: &CellSlice<'_>, slice_len: (u16, u8), bits: u1
     } else {
         (0, 0)
     }
+}
+
+fn dump_dummy_debug_str(
+    cs: &mut CellSlice<'_>,
+    args: u32,
+    bits: u16,
+    f: &mut dyn std::fmt::Write,
+) -> Result<()> {
+    let slice_bits = ((args as u16 & 0xf) + 1) * 8;
+    if !cs.has_remaining(bits + slice_bits, 0) {
+        return Ok(());
+    }
+    cs.try_advance(bits, 0);
+    let mut slice = cs.get_prefix(slice_bits, 0);
+    cs.try_advance(slice_bits, 0);
+    slice_trim_end(&mut slice)?;
+
+    write!(f, "DEBUGSTR x{}", slice.display_data())?;
+    if !slice.is_refs_empty() {
+        write!(f, ",{}", slice.remaining_refs())?;
+    }
+    Ok(())
+}
+
+fn compute_len_debug_str(cs: &CellSlice<'_>, args: u32, bits: u16) -> (u16, u8) {
+    let bits = bits + ((args as u16 & 0xf) + 1) * 8;
+    (bits * cs.has_remaining(bits, 0) as u16, 0)
 }
 
 fn dump_store_int_var(_: &mut CellSlice<'_>, args: u32, f: &mut dyn std::fmt::Write) -> Result<()> {
