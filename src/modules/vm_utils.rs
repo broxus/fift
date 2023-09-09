@@ -71,6 +71,7 @@ fn cp0() -> &'static DispatchTable {
         register_tuple_ops(&mut t)?;
         register_arith_ops(&mut t)?;
         register_cell_ops(&mut t)?;
+        register_continuation_ops(&mut t)?;
         register_ton_ops(&mut t)?;
         register_codepage_ops(&mut t)?;
         Ok(t.finalize())
@@ -449,6 +450,138 @@ fn register_cell_ops(t: &mut OpcodeTable) -> Result<()> {
     t.add_simple(0xd762, 16, "LDSAME")?;
     t.add_simple(0xd764, 16, "SDEPTH")?;
     t.add_simple(0xd765, 16, "CDEPTH")?;
+
+    Ok(())
+}
+
+#[rustfmt::skip]
+fn register_continuation_ops(t: &mut OpcodeTable) -> Result<()> {
+    // Jump
+    t.add_simple(0xd8, 8, "EXECUTE")?;
+    t.add_simple(0xd9, 8, "JMPX")?;
+    t.add_fixed(0xda, 8, 8, dump_2c("CALLXARGS ", ","))?;
+    t.add_fixed(0xdb0, 12, 4, dump_1c_suffix("CALLXARGS ", ",-1"))?;
+    t.add_fixed(0xdb1, 12, 4, dump_1c("JMPXARGS "))?;
+    t.add_fixed(0xdb2, 12, 4, dump_1c("RETARGS "))?;
+    t.add_simple(0xdb30, 16, "RET")?;
+    t.add_simple(0xdb31, 16, "RETALT")?;
+    t.add_simple(0xdb32, 16, "RETBOOL")?;
+    t.add_simple(0xdb34, 16, "CALLCC")?;
+    t.add_simple(0xdb35, 16, "JMPXDATA")?;
+    t.add_fixed(0xdb36, 16, 8, dump_2c("CALLCCARGS ", ","))?;
+    t.add_simple(0xdb38, 16, "CALLXVARARGS")?;
+    t.add_simple(0xdb39, 16, "RETVARARGS")?;
+    t.add_simple(0xdb3a, 16, "JMPXVARARGS")?;
+    t.add_simple(0xdb3b, 16, "CALLCCVARARGS")?;
+    t.add_ext(0xdb3c, 16, 0, dump_push_ref("CALLREF"), Box::new(compute_len_push_ref))?;
+    t.add_ext(0xdb3d, 16, 0, dump_push_ref("JMPREF"), Box::new(compute_len_push_ref))?;
+    t.add_ext(0xdb3e, 16, 0, dump_push_ref("JMPREFDATA"), Box::new(compute_len_push_ref))?;
+    t.add_simple(0xdb3f, 16, "RETDATA")?;
+
+    // Loops
+    t.add_simple(0xdc, 8, "IFRET")?;
+    t.add_simple(0xdd, 8, "IFNOTRET")?;
+    t.add_simple(0xde, 8, "IF")?;
+    t.add_simple(0xdf, 8, "IFNOT")?;
+    t.add_simple(0xe0, 8, "IFJMP")?;
+    t.add_simple(0xe1, 8, "IFNOTJMP")?;
+    t.add_simple(0xe2, 8, "IFELSE")?;
+    t.add_ext(0xe300, 16, 0, dump_push_ref("IFREF"), Box::new(compute_len_push_ref))?;
+    t.add_ext(0xe301, 16, 0, dump_push_ref("IFNOTREF"), Box::new(compute_len_push_ref))?;
+    t.add_ext(0xe302, 16, 0, dump_push_ref("IFJMPREF"), Box::new(compute_len_push_ref))?;
+    t.add_ext(0xe303, 16, 0, dump_push_ref("IFNOTJMPREF"), Box::new(compute_len_push_ref))?;
+    t.add_simple(0xe304, 16, "CONDSEL")?;
+    t.add_simple(0xe305, 16, "CONDSELCHK")?;
+    t.add_simple(0xe308, 16, "IFRETALT")?;
+    t.add_simple(0xe309, 16, "IFNOTRETALT")?;
+
+    t.add_ext(0xe30d, 16, 0, dump_push_ref("IFREFELSE"), Box::new(compute_len_push_ref))?;
+    t.add_ext(0xe30e, 16, 0, dump_push_ref("IFELSEREF"), Box::new(compute_len_push_ref))?;
+    t.add_ext(0xe30f, 16, 0, dump_push_ref2("IFREFELSEREF"), Box::new(compute_len_push_ref2))?;
+    t.add_fixed(0xe380 >> 6, 10, 6, Box::new(dump_if_bit_jmp))?;
+    t.add_ext(0xe3c0 >> 6, 10, 6, Box::new(dump_if_bit_jmpref), Box::new(compute_len_push_ref))?;
+
+    t.add_simple(0xe4, 8, "REPEAT")?;
+    t.add_simple(0xe5, 8, "REPEATEND")?;
+    t.add_simple(0xe6, 8, "UNTIL")?;
+    t.add_simple(0xe7, 8, "UNTILEND")?;
+    t.add_simple(0xe8, 8, "WHILE")?;
+    t.add_simple(0xe9, 8, "WHILEEND")?;
+    t.add_simple(0xea, 8, "AGAIN")?;
+    t.add_simple(0xeb, 8, "AGAINEND")?;
+
+    t.add_simple(0xe314, 16, "REPEATBRK")?;
+    t.add_simple(0xe315, 16, "REPEATENDBRK")?;
+    t.add_simple(0xe316, 16, "UNTILBRK")?;
+    t.add_simple(0xe317, 16, "UNTILENDBRK")?;
+    t.add_simple(0xe318, 16, "WHILEBRK")?;
+    t.add_simple(0xe319, 16, "WHILEENDBRK")?;
+    t.add_simple(0xe31a, 16, "AGAINBRK")?;
+    t.add_simple(0xe31b, 16, "AGAINENDBRK")?;
+
+    // Cont change
+    t.add_fixed(0xec, 8, 8, dump_setcontargs("SETCONTARGS"))?;
+    t.add_fixed(0xed0, 12, 4, dump_1c("RETURNARGS "))?;
+    t.add_simple(0xed10, 16, "RETURNVARARGS")?;
+    t.add_simple(0xed11, 16, "SETCONTVARARGS")?;
+    t.add_simple(0xed12, 16, "SETNUMVARARGS")?;
+    t.add_simple(0xed1e, 16, "BLESS")?;
+    t.add_simple(0xed1f, 16, "BLESSVARARGS")?;
+
+    fn reg_ctr_oprange(t: &mut OpcodeTable, opcode: u32, name: &'static str) -> Result<()> {
+        t.add_fixed_range(opcode, opcode + 4, 16, 4, dump_1c(name))?;
+        t.add_fixed_range(opcode + 4, opcode + 6, 16, 4, dump_1c(name))?;
+        t.add_fixed_range(opcode + 7, opcode + 8, 16, 4, dump_1c(name))
+    }
+
+    reg_ctr_oprange(t, 0xed40, "PUSH c")?;
+    reg_ctr_oprange(t, 0xed50, "POP c")?;
+    reg_ctr_oprange(t, 0xed60, "SETCONTCTR c")?;
+    reg_ctr_oprange(t, 0xed70, "SETRETCTR c")?;
+    reg_ctr_oprange(t, 0xed80, "SETALTCTR c")?;
+    reg_ctr_oprange(t, 0xed90, "POPSAVE c")?;
+    reg_ctr_oprange(t, 0xeda0, "SAVECTR c")?;
+    reg_ctr_oprange(t, 0xedb0, "SAVEALTCTR c")?;
+    reg_ctr_oprange(t, 0xedc0, "PUSSAVEBOTHCTRH c")?;
+
+    t.add_simple(0xede0, 16, "PUSHCTRX")?;
+    t.add_simple(0xede1, 16, "POPCTRX")?;
+    t.add_simple(0xede2, 16, "SETCONTCTRX")?;
+
+    t.add_simple(0xedf0, 16, "BOOLAND")?;
+    t.add_simple(0xedf1, 16, "BOOLOR")?;
+    t.add_simple(0xedf2, 16, "COMPOSBOTH")?;
+    t.add_simple(0xedf3, 16, "ATEXIT")?;
+    t.add_simple(0xedf4, 16, "ATEXITALT")?;
+    t.add_simple(0xedf5, 16, "SETEXITALT")?;
+    t.add_simple(0xedf6, 16, "THENRET")?;
+    t.add_simple(0xedf7, 16, "THENRETALT")?;
+    t.add_simple(0xedf8, 16, "INVERT")?;
+    t.add_simple(0xedf9, 16, "BOOLEVAL")?;
+    t.add_simple(0xedfa, 16, "SAMEALT")?;
+    t.add_simple(0xedfb, 16, "SAMEALTSAVE")?;
+
+    t.add_fixed(0xee, 8, 8, dump_setcontargs("BLESSARGS"))?;
+
+    // Dict jump
+    t.add_fixed(0xf0, 8, 8, dump_1c_and(0xff, "CALLDICT "))?;
+    t.add_fixed(0xf100 >> 6, 10, 14, dump_1c_and(0x3fff, "CALLDICT "))?;
+    t.add_fixed(0xf140 >> 6, 10, 14, dump_1c_and(0x3fff, "JMPDICT"))?;
+    t.add_fixed(0xf180 >> 6, 10, 14, dump_1c_and(0x3fff, "PREPAREDICT "))?;
+
+    // Exception
+    t.add_fixed(0xf200 >> 6, 10, 6, dump_1c_and(0x3f, "THROW "))?;
+    t.add_fixed(0xf240 >> 6, 10, 6, dump_1c_and(0x3f, "THROWIF "))?;
+    t.add_fixed(0xf280 >> 6, 10, 6, dump_1c_and(0x3f, "THROWIFNOT "))?;
+    t.add_fixed(0xf2c0 >> 3, 13, 11, dump_1c_and(0x7ff, "THROW "))?;
+    t.add_fixed(0xf2c8 >> 3, 13, 11, dump_1c_and(0x7ff, "THROWARG "))?;
+    t.add_fixed(0xf2d0 >> 3, 13, 11, dump_1c_and(0x7ff, "THROWIF "))?;
+    t.add_fixed(0xf2d8 >> 3, 13, 11, dump_1c_and(0x7ff, "THROWARGIF "))?;
+    t.add_fixed(0xf2e0 >> 3, 13, 11, dump_1c_and(0x7ff, "THROWIFNOT "))?;
+    t.add_fixed(0xf2e8 >> 3, 13, 11, dump_1c_and(0x7ff, "THROWARGIFNOT "))?;
+    t.add_fixed_range(0xf2f0, 0xf2f6, 16, 3, Box::new(dump_throw_any))?;
+    t.add_simple(0xf2ff, 16, "TRY")?;
+    t.add_fixed(0xf3, 8, 8, dump_2c("TRYARGS ", ","))?;
 
     Ok(())
 }
@@ -899,6 +1032,13 @@ fn dump_1c(prefix: &'static str) -> Box<FnDumpArgInstr> {
     })
 }
 
+fn dump_1c_suffix(prefix: &'static str, suffix: &'static str) -> Box<FnDumpArgInstr> {
+    Box::new(move |_, args, f| {
+        write!(f, "{prefix}{}{suffix}", args & 0xf)?;
+        Ok(())
+    })
+}
+
 fn dump_1c_and(mask: u32, prefix: &'static str) -> Box<FnDumpArgInstr> {
     Box::new(move |_, args, f| {
         write!(f, "{prefix}{}", args & mask)?;
@@ -1078,6 +1218,70 @@ fn compute_len_push_ref(cs: &CellSlice<'_>, _: u32, bits: u16) -> (u16, u8) {
     } else {
         (0, 0)
     }
+}
+
+fn dump_push_ref2(name: &'static str) -> Box<FnDumpInstr> {
+    Box::new(move |cs, _, bits, f| {
+        if !cs.has_remaining(0, 2) {
+            return Ok(());
+        }
+        cs.try_advance(bits, 0);
+        let cell1 = cs.load_reference()?;
+        let cell2 = cs.load_reference()?;
+        write!(f, "{name} ({}) ({})", cell1.repr_hash(), cell2.repr_hash())?;
+        Ok(())
+    })
+}
+
+fn compute_len_push_ref2(cs: &CellSlice<'_>, _: u32, bits: u16) -> (u16, u8) {
+    if cs.has_remaining(0, 2) {
+        (bits, 2)
+    } else {
+        (0, 0)
+    }
+}
+
+fn dump_if_bit_jmp(_: &mut CellSlice<'_>, args: u32, f: &mut dyn std::fmt::Write) -> Result<()> {
+    let neg = if args & 0x20 != 0 { "N" } else { "" };
+    write!(f, "IF{neg}BITJMP {}", args & 0x1f)?;
+    Ok(())
+}
+
+fn dump_if_bit_jmpref(
+    cs: &mut CellSlice<'_>,
+    args: u32,
+    bits: u16,
+    f: &mut dyn std::fmt::Write,
+) -> Result<()> {
+    if cs.is_refs_empty() {
+        return Ok(());
+    }
+    cs.try_advance(bits, 1);
+    let neg = if args & 0x20 != 0 { "N" } else { "" };
+    write!(f, "IF{neg}BITJMPREF {}", args & 0x1f)?;
+    Ok(())
+}
+
+fn dump_setcontargs(name: &'static str) -> Box<FnDumpArgInstr> {
+    Box::new(move |_, args, f| {
+        let copy = (args >> 4) & 0xf;
+        let more = ((args + 1) & 0xf) - 1;
+        write!(f, "{name} {copy},{more}")?;
+        Ok(())
+    })
+}
+
+fn dump_throw_any(_: &mut CellSlice<'_>, args: u32, f: &mut dyn std::fmt::Write) -> Result<()> {
+    let param = if args & 0b001 != 0 { "ARG" } else { "" };
+    let cond = if args & 0b110 != 0 {
+        "IF"
+    } else if args & 0b100 != 0 {
+        "IFNOT"
+    } else {
+        ""
+    };
+    write!(f, "THROW{param}{cond}")?;
+    Ok(())
 }
 
 fn dump_push_slice(
