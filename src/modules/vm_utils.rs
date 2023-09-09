@@ -319,8 +319,136 @@ fn register_cell_ops(t: &mut OpcodeTable) -> Result<()> {
     t.add_ext(0x88, 8, 0, dump_push_ref("PUSHREF"), Box::new(compute_len_push_ref))?;
     t.add_ext(0x89, 8, 0, dump_push_ref("PUSHREFSLICE"), Box::new(compute_len_push_ref))?;
     t.add_ext(0x8a, 8, 0, dump_push_ref("PUSHREFCONT"), Box::new(compute_len_push_ref))?;
+    t.add_ext(0x8b, 8, 4, Box::new(dump_push_slice), Box::new(compute_len_push_slice))?;
+    t.add_ext(0x8c, 8, 7, Box::new(dump_push_slice_r), Box::new(compute_len_push_slice_r))?;
+    t.add_ext_range((0x8d * 8) << 7, (0x8d * 8 + 5) << 7, 18, 10, Box::new(dump_push_slice_r2), Box::new(compute_len_push_slice_r2))?;
+    t.add_ext(0x8e / 2, 7, 9, Box::new(dump_push_cont), Box::new(compute_len_push_cont))?;
+    t.add_ext(0x9, 4, 4, Box::new(dump_push_cont_simple), Box::new(compute_len_push_cont_simple))?;
 
-    // TODO
+    // Cell compare
+    t.add_simple(0xc700, 16, "SEMPTY")?;
+    t.add_simple(0xc701, 16, "SDEMPTY")?;
+    t.add_simple(0xc702, 16, "SREMPTY")?;
+    t.add_simple(0xc704, 16, "SDFIRST")?;
+    t.add_simple(0xc704, 16, "SDLEXCMP")?;
+    t.add_simple(0xc705, 16, "SDEQ")?;
+
+    t.add_simple(0xc708, 16, "SDPFX")?;
+    t.add_simple(0xc709, 16, "SDPFXREV")?;
+    t.add_simple(0xc70a, 16, "SDPPFX")?;
+    t.add_simple(0xc70b, 16, "SDPPFXREV")?;
+    t.add_simple(0xc70c, 16, "SDSFX")?;
+    t.add_simple(0xc70d, 16, "SDSFXREV")?;
+    t.add_simple(0xc70e, 16, "SDPSFX")?;
+    t.add_simple(0xc70f, 16, "SDPSFXREV")?;
+    t.add_simple(0xc710, 16, "SDCNTLEAD0")?;
+    t.add_simple(0xc711, 16, "SDCNTLEAD1")?;
+    t.add_simple(0xc712, 16, "SDCNTTRAIL0")?;
+    t.add_simple(0xc713, 16, "SDCNTTRAIL1")?;
+
+    // Cell serialization
+    t.add_simple(0xc8, 8, "NEWC")?;
+    t.add_simple(0xc9, 8, "ENDC")?;
+    t.add_fixed(0xca, 8, 8, dump_1c_l_add(1, "STI "))?;
+    t.add_fixed(0xcb, 8, 8, dump_1c_l_add(1, "STU "))?;
+    t.add_simple(0xcc, 8, "STREF")?;
+    t.add_simple(0xcd, 8, "ENDCST")?;
+    t.add_simple(0xce, 8, "STSLICE")?;
+    t.add_fixed(0xcf00 >> 3, 13, 3, Box::new(dump_store_int_var))?;
+    t.add_fixed(0xcf08 >> 3, 13, 11, Box::new(dump_store_int_fixed))?;
+    t.add_simple(0xcf10, 16, "STREF")?;
+    t.add_simple(0xcf11, 16, "STBREF")?;
+    t.add_simple(0xcf12, 16, "STSLICE")?;
+    t.add_simple(0xcf13, 16, "STB")?;
+    t.add_simple(0xcf14, 16, "STREFR")?;
+    t.add_simple(0xcf15, 16, "STBREFR")?;
+    t.add_simple(0xcf16, 16, "STSLICER")?;
+    t.add_simple(0xcf17, 16, "STBR")?;
+    t.add_simple(0xcf18, 16, "STREFQ")?;
+    t.add_simple(0xcf19, 16, "STBREFQ")?;
+    t.add_simple(0xcf1a, 16, "STSLICEQ")?;
+    t.add_simple(0xcf1b, 16, "STBQ")?;
+    t.add_simple(0xcf1c, 16, "STREFRQ")?;
+    t.add_simple(0xcf1d, 16, "STBREFRQ")?;
+    t.add_simple(0xcf1e, 16, "STSLICERQ")?;
+    t.add_simple(0xcf1f, 16, "STBRQ")?;
+    t.add_ext_range(0xcf20, 0xcf22, 16, 1, Box::new(dump_store_cont_ref), Box::new(compute_len_store_const_ref))?;
+    t.add_simple(0xcf23, 16, "ENDXC")?;
+    t.add_fixed(0xcf28 >> 2, 14, 2, Box::new(dump_store_le_int))?;
+    t.add_simple(0xcf30, 16, "BDEPTH")?;
+    t.add_simple(0xcf31, 16, "BBITS")?;
+    t.add_simple(0xcf32, 16, "BREFS")?;
+    t.add_simple(0xcf33, 16, "BBITREFS")?;
+
+    t.add_simple(0xcf35, 16, "BREMBITS")?;
+    t.add_simple(0xcf36, 16, "BREMREFS")?;
+    t.add_simple(0xcf37, 16, "BREMBITREFS")?;
+    t.add_fixed(0xcf38, 16, 8, dump_1c_l_add(1, "BCHKBITS "))?;
+    t.add_simple(0xcf39, 16, "BCHKBITS")?;
+    t.add_simple(0xcf3a, 16, "BCHKREFS")?;
+    t.add_simple(0xcf3b, 16, "BCHKBITREFS")?;
+    t.add_fixed(0xcf3c, 16, 8, dump_1c_l_add(1, "BCHKBITSQ "))?;
+    t.add_simple(0xcf3d, 16, "BCHKBITSQ")?;
+    t.add_simple(0xcf3e, 16, "BCHKREFSQ")?;
+    t.add_simple(0xcf3f, 16, "BCHKBITREFSQ")?;
+    t.add_simple(0xcf40, 16, "STZEROES")?;
+    t.add_simple(0xcf41, 16, "STONES")?;
+    t.add_simple(0xcf42, 16, "STSAME")?;
+    t.add_ext(0xcf80 >> 7, 9, 5, Box::new(dump_store_const_slice), Box::new(compute_len_store_const_slice))?;
+
+    // Cell deserialization
+    t.add_simple(0xd0, 8, "CTOS")?;
+    t.add_simple(0xd1, 8, "ENDS")?;
+    t.add_fixed(0xd2, 8, 8, dump_1c_l_add(1, "LDI "))?;
+    t.add_fixed(0xd3, 8, 8, dump_1c_l_add(1, "LDU "))?;
+    t.add_simple(0xd4, 8, "LDREF")?;
+    t.add_simple(0xd5, 8, "LDREFRTOS")?;
+    t.add_fixed(0xd6, 8, 8, dump_1c_l_add(1, "LDSLICE "))?;
+    t.add_fixed(0xd700 >> 3, 13, 3, Box::new(dump_load_int_var))?;
+    t.add_fixed(0xd708 >> 3, 13, 11, Box::new(dump_load_int_fixed2))?;
+    t.add_fixed(0xd710 >> 3, 13, 3, Box::new(dump_preload_uint_fixed_0e))?;
+    t.add_fixed(0xd718 >> 2, 14, 2, Box::new(dump_load_slice))?;
+    t.add_fixed(0xd71c >> 2, 14, 10, Box::new(dump_load_slice_fixed2))?;
+    t.add_simple(0xd720, 16, "SDCUTFIRST")?;
+    t.add_simple(0xd721, 16, "SDSKIPFIRST")?;
+    t.add_simple(0xd722, 16, "SDCUTLAST")?;
+    t.add_simple(0xd723, 16, "SDSKIPLAST")?;
+    t.add_simple(0xd724, 16, "SDSUBSTR")?;
+
+    t.add_simple(0xd726, 16, "SDBEGINSX")?;
+    t.add_simple(0xd727, 16, "SDBEGINSXQ")?;
+    t.add_ext(0xd728 >> 3, 13, 8, Box::new(dump_slice_begins_with_const), Box::new(compute_len_slice_begins_with_const))?;
+    t.add_simple(0xd730, 16, "SCUTFIRST")?;
+    t.add_simple(0xd731, 16, "SSKIPFIRST")?;
+    t.add_simple(0xd732, 16, "SCUTLAST")?;
+    t.add_simple(0xd733, 16, "SSKIPLAST")?;
+    t.add_simple(0xd734, 16, "SUBSLICE")?;
+
+    t.add_simple(0xd736, 16, "SPLIT")?;
+    t.add_simple(0xd737, 16, "SPLITQ")?;
+
+    t.add_simple(0xd739, 16, "XCTOS")?;
+    t.add_simple(0xd73a, 16, "XLOAD")?;
+    t.add_simple(0xd73b, 16, "XLOADQ")?;
+
+    t.add_simple(0xd741, 16, "SCHKBITS")?;
+    t.add_simple(0xd742, 16, "SCHKREFS")?;
+    t.add_simple(0xd743, 16, "SCHKBITREFS")?;
+
+    t.add_simple(0xd745, 16, "SCHKBITSQ")?;
+    t.add_simple(0xd746, 16, "SCHKREFSQ")?;
+    t.add_simple(0xd747, 16, "SCHKBITREFSQ")?;
+    t.add_simple(0xd748, 16, "PLDREFVAR")?;
+    t.add_simple(0xd749, 16, "SBITS")?;
+    t.add_simple(0xd74a, 16, "SREFS")?;
+    t.add_simple(0xd74b, 16, "SBITREFS")?;
+    t.add_fixed(0xd74c >> 2, 14, 2, dump_1c_and(0b11, "PLDREFIDX "))?;
+    t.add_fixed(0xd75, 12, 4, Box::new(dump_load_le_int))?;
+    t.add_simple(0xd760, 16, "LDZEROES")?;
+    t.add_simple(0xd761, 16, "LDONES")?;
+    t.add_simple(0xd762, 16, "LDSAME")?;
+    t.add_simple(0xd764, 16, "SDEPTH")?;
+    t.add_simple(0xd765, 16, "CDEPTH")?;
 
     Ok(())
 }
@@ -940,6 +1068,280 @@ fn compute_len_push_ref(cs: &CellSlice<'_>, _: u32, bits: u16) -> (u16, u8) {
     } else {
         (0, 0)
     }
+}
+
+fn dump_push_slice(
+    cs: &mut CellSlice<'_>,
+    args: u32,
+    bits: u16,
+    f: &mut dyn std::fmt::Write,
+) -> Result<()> {
+    let slice_bits = (args as u16 & 0xf) * 8 + 4;
+    dump_push_slice_ext(cs, (slice_bits, 0), bits, "PUSHSLICE", f)
+}
+
+fn compute_len_push_slice(cs: &CellSlice<'_>, args: u32, bits: u16) -> (u16, u8) {
+    let slice_bits = (args as u16 & 0xf) * 8 + 4;
+    compute_len_push_slice_ext(cs, (slice_bits, 0), bits)
+}
+
+fn dump_push_slice_r(
+    cs: &mut CellSlice<'_>,
+    args: u32,
+    bits: u16,
+    f: &mut dyn std::fmt::Write,
+) -> Result<()> {
+    let slice_bits = (args as u16 & 31) * 8 + 1;
+    let slice_refs = ((args as u8 >> 5) & 0b11) + 1;
+    dump_push_slice_ext(cs, (slice_bits, slice_refs), bits, "PUSHSLICE", f)
+}
+
+fn compute_len_push_slice_r(cs: &CellSlice<'_>, args: u32, bits: u16) -> (u16, u8) {
+    let slice_bits = (args as u16 & 31) * 8 + 1;
+    let slice_refs = ((args as u8 >> 5) & 0b11) + 1;
+    compute_len_push_slice_ext(cs, (slice_bits, slice_refs), bits)
+}
+
+fn dump_push_slice_r2(
+    cs: &mut CellSlice<'_>,
+    args: u32,
+    bits: u16,
+    f: &mut dyn std::fmt::Write,
+) -> Result<()> {
+    let slice_bits = (args as u16 & 127) * 8 + 6;
+    let slice_refs = ((args >> 7) & 7) as u8;
+    dump_push_slice_ext(cs, (slice_bits, slice_refs), bits, "PUSHSLICE", f)
+}
+
+fn compute_len_push_slice_r2(cs: &CellSlice<'_>, args: u32, bits: u16) -> (u16, u8) {
+    let slice_bits = (args as u16 & 127) * 8 + 6;
+    let slice_refs = ((args >> 7) & 7) as u8;
+    compute_len_push_slice_ext(cs, (slice_bits, slice_refs), bits)
+}
+
+fn dump_push_cont(
+    cs: &mut CellSlice<'_>,
+    args: u32,
+    bits: u16,
+    f: &mut dyn std::fmt::Write,
+) -> Result<()> {
+    let slice_bits = (args as u16 & 127) * 8;
+    let slice_refs = ((args >> 7) & 0b11) as u8;
+    dump_push_slice_ext(cs, (slice_bits, slice_refs), bits, "PUSHCONT", f)
+}
+
+fn compute_len_push_cont(cs: &CellSlice<'_>, args: u32, bits: u16) -> (u16, u8) {
+    let slice_bits = (args as u16 & 127) * 8;
+    let slice_refs = ((args >> 7) & 0b11) as u8;
+    compute_len_push_slice_ext(cs, (slice_bits, slice_refs), bits)
+}
+
+fn dump_push_cont_simple(
+    cs: &mut CellSlice<'_>,
+    args: u32,
+    bits: u16,
+    f: &mut dyn std::fmt::Write,
+) -> Result<()> {
+    let slice_bits = (args as u16 & 0xf) * 8;
+    dump_push_slice_ext(cs, (slice_bits, 0), bits, "PUSHCONT", f)
+}
+
+fn compute_len_push_cont_simple(cs: &CellSlice<'_>, args: u32, bits: u16) -> (u16, u8) {
+    let slice_bits = (args as u16 & 0xf) * 8;
+    compute_len_push_slice_ext(cs, (slice_bits, 0), bits)
+}
+
+fn dump_store_const_slice(
+    cs: &mut CellSlice<'_>,
+    args: u32,
+    bits: u16,
+    f: &mut dyn std::fmt::Write,
+) -> Result<()> {
+    let slice_bits = (args as u16 & 7) * 8 + 2;
+    let slice_refs = (args as u8 >> 3) & 0b11;
+    dump_push_slice_ext(cs, (slice_bits, slice_refs), bits, "STSLICECONST", f)
+}
+
+fn compute_len_store_const_slice(cs: &CellSlice<'_>, args: u32, bits: u16) -> (u16, u8) {
+    let slice_bits = (args as u16 & 7) * 8 + 2;
+    let slice_refs = (args as u8 >> 3) & 0b11;
+    compute_len_push_slice_ext(cs, (slice_bits, slice_refs), bits)
+}
+
+fn dump_push_slice_ext(
+    cs: &mut CellSlice<'_>,
+    slice_len: (u16, u8),
+    bits: u16,
+    name: &'static str,
+    f: &mut dyn std::fmt::Write,
+) -> Result<()> {
+    let (slice_bits, slice_refs) = slice_len;
+    if !cs.has_remaining(bits + slice_bits, slice_refs) {
+        return Ok(());
+    }
+    cs.try_advance(bits, 0);
+    let slice = cs.get_prefix(slice_bits, slice_refs);
+    cs.try_advance(slice_bits, slice_refs);
+    write!(f, "{name} x{}", slice.display_data())?;
+    if !slice.is_refs_empty() {
+        write!(f, ",{}", slice.remaining_refs())?;
+    }
+    Ok(())
+}
+
+fn compute_len_push_slice_ext(cs: &CellSlice<'_>, slice_len: (u16, u8), bits: u16) -> (u16, u8) {
+    let (slice_bits, slice_refs) = slice_len;
+    let bits = bits + slice_bits;
+    if cs.has_remaining(bits, slice_refs) {
+        (bits, slice_refs)
+    } else {
+        (0, 0)
+    }
+}
+
+fn dump_store_int_var(_: &mut CellSlice<'_>, args: u32, f: &mut dyn std::fmt::Write) -> Result<()> {
+    let signed = if args & 0b001 != 0 { "I" } else { "U" };
+    write!(f, "ST{signed}X")?;
+    if args & 0b010 != 0 {
+        f.write_str("R")?;
+    }
+    if args & 0b100 != 0 {
+        f.write_str("Q")?;
+    }
+    Ok(())
+}
+
+fn dump_store_int_fixed(
+    _: &mut CellSlice<'_>,
+    args: u32,
+    f: &mut dyn std::fmt::Write,
+) -> Result<()> {
+    let bits = (args & 0xff) + 1;
+    let signed = if args & 0x100 != 0 { "I" } else { "U" };
+    write!(f, "ST{signed}")?;
+    if args & 0x200 != 0 {
+        f.write_str("R")?;
+    }
+    if args & 0x400 != 0 {
+        f.write_str("Q")?;
+    }
+    write!(f, " {bits}")?;
+    Ok(())
+}
+
+fn dump_store_cont_ref(
+    cs: &mut CellSlice<'_>,
+    args: u32,
+    bits: u16,
+    f: &mut dyn std::fmt::Write,
+) -> Result<()> {
+    let refs = (args as u8 & 1) + 1;
+    if !cs.has_remaining(0, refs) {
+        return Ok(());
+    }
+    cs.try_advance(bits, refs);
+    if refs > 1 {
+        write!(f, "STREF{refs}CONST")?;
+    } else {
+        f.write_str("STREFCONST")?;
+    }
+    Ok(())
+}
+
+fn compute_len_store_const_ref(cs: &CellSlice<'_>, args: u32, bits: u16) -> (u16, u8) {
+    let refs = (args as u8 & 1) + 1;
+    if cs.has_remaining(0, refs) {
+        (bits, refs)
+    } else {
+        (0, 0)
+    }
+}
+
+fn dump_store_le_int(_: &mut CellSlice<'_>, args: u32, f: &mut dyn std::fmt::Write) -> Result<()> {
+    let signed = if args & 0b01 != 0 { "I" } else { "U" };
+    let long = if args & 0b10 != 0 { "8" } else { "4" };
+    write!(f, "ST{signed}LE{long}")?;
+    Ok(())
+}
+
+fn dump_load_int_var(_: &mut CellSlice<'_>, args: u32, f: &mut dyn std::fmt::Write) -> Result<()> {
+    let ld = if args & 0b010 != 0 { "PLD" } else { "LD" };
+    let signed = if args & 0b001 != 0 { "UX" } else { "IX" };
+    let quiet = if args & 0b100 != 0 { "Q" } else { "" };
+    write!(f, "{ld}{signed}{quiet}")?;
+    Ok(())
+}
+
+fn dump_load_int_fixed2(
+    _: &mut CellSlice<'_>,
+    args: u32,
+    f: &mut dyn std::fmt::Write,
+) -> Result<()> {
+    let ld = if args & 0x200 != 0 { "PLD" } else { "LD" };
+    let signed = if args & 0x100 != 0 { "U" } else { "I" };
+    let quiet = if args & 0x400 != 0 { "Q" } else { "" };
+    write!(f, "{ld}{signed}{quiet} {}", (args & 0xff) + 1)?;
+    Ok(())
+}
+
+fn dump_preload_uint_fixed_0e(
+    _: &mut CellSlice<'_>,
+    args: u32,
+    f: &mut dyn std::fmt::Write,
+) -> Result<()> {
+    write!(f, "PLDUZ {}", ((args & 7) + 1) << 5)?;
+    Ok(())
+}
+
+fn dump_load_slice(_: &mut CellSlice<'_>, args: u32, f: &mut dyn std::fmt::Write) -> Result<()> {
+    let p = if args & 0b01 != 0 { "P" } else { "" };
+    let q = if args & 0b10 != 0 { "Q" } else { "" };
+    write!(f, "{p}LDSLICEX{q}")?;
+    Ok(())
+}
+
+fn dump_load_slice_fixed2(
+    _: &mut CellSlice<'_>,
+    args: u32,
+    f: &mut dyn std::fmt::Write,
+) -> Result<()> {
+    let ld = if args & 0x100 != 0 {
+        "PLDSLICE"
+    } else {
+        "LDSLICE"
+    };
+    let q = if args & 0x200 != 0 { "Q" } else { "" };
+    write!(f, "{ld}{q} {}", (args & 0xff) + 1)?;
+    Ok(())
+}
+
+fn dump_slice_begins_with_const(
+    cs: &mut CellSlice<'_>,
+    args: u32,
+    bits: u16,
+    f: &mut dyn std::fmt::Write,
+) -> Result<()> {
+    let name = if args & 128 != 0 {
+        "SDBEGINSQ"
+    } else {
+        "SDBEGINS"
+    };
+    let slice_bits = ((args & 127) * 8 + 3) as u16;
+    dump_push_slice_ext(cs, (slice_bits, 0), bits, name, f)
+}
+
+fn compute_len_slice_begins_with_const(cs: &CellSlice<'_>, args: u32, bits: u16) -> (u16, u8) {
+    let slice_bits = ((args & 127) * 8 + 3) as u16;
+    compute_len_push_slice_ext(cs, (slice_bits, 0), bits)
+}
+
+fn dump_load_le_int(_: &mut CellSlice<'_>, args: u32, f: &mut dyn std::fmt::Write) -> Result<()> {
+    let ld = if args & 0b0100 != 0 { "PLD" } else { "LD" };
+    let signed = if args & 0b0001 != 0 { "I" } else { "U" };
+    let size = if args & 0b0010 != 0 { "8" } else { "4" };
+    let quiet = if args & 0b1000 != 0 { "Q" } else { "" };
+    write!(f, "{ld}{signed}LE{size}{quiet}")?;
+    Ok(())
 }
 
 fn dump_divmod(quiet: bool) -> Box<FnDumpArgInstr> {
