@@ -2,7 +2,6 @@ use std::iter::Peekable;
 use std::rc::Rc;
 
 use anyhow::{Context as _, Result};
-use everscale_types::cell::DefaultFinalizer;
 use everscale_types::dict::{self, dict_get, dict_insert, dict_remove_owned, SetMode};
 use everscale_types::prelude::*;
 use num_bigint::BigInt;
@@ -31,7 +30,7 @@ impl DictUtils {
     fn interpret_store_dict(stack: &mut Stack) -> Result<()> {
         let maybe_cell = pop_maybe_cell(stack)?;
         let mut builder = stack.pop_builder()?;
-        maybe_cell.store_into(Rc::make_mut(&mut builder), &mut Cell::default_finalizer())?;
+        maybe_cell.store_into(Rc::make_mut(&mut builder), &mut Cell::empty_context())?;
         stack.push_raw(builder)
     }
 
@@ -88,7 +87,7 @@ impl DictUtils {
             bits,
             &value,
             mode,
-            &mut Cell::default_finalizer(),
+            &mut Cell::empty_context(),
         );
 
         // TODO: use operation result flag?
@@ -112,7 +111,9 @@ impl DictUtils {
         );
 
         let key = key.apply()?.get_prefix(bits, 0);
-        let value = dict_get(cell.as_ref(), bits, key).ok().flatten();
+        let value = dict_get(cell.as_ref(), bits, key, &mut Cell::empty_context())
+            .ok()
+            .flatten();
 
         let res = value.is_some();
         if let Some(value) = value {
@@ -140,14 +141,8 @@ impl DictUtils {
         );
 
         let key = &mut key.apply()?.get_prefix(bits, 0);
-        let value = dict_remove_owned(
-            dict.as_ref(),
-            key,
-            bits,
-            false,
-            &mut Cell::default_finalizer(),
-        )
-        .ok();
+        let value =
+            dict_remove_owned(dict.as_ref(), key, bits, false, &mut Cell::empty_context()).ok();
 
         let (dict, value) = match value {
             Some((dict, value)) => (dict, value),
@@ -278,7 +273,7 @@ impl LoopContImpl for DictMapCont {
                 key.bit_len(),
                 &value.as_full_slice(),
                 SetMode::Set,
-                &mut Cell::default_finalizer(),
+                &mut Cell::empty_context(),
             )?;
             self.result = new_root;
         }
@@ -392,7 +387,7 @@ impl LoopContImpl for DictMergeCont {
                 key.bit_len(),
                 &value.apply()?,
                 SetMode::Set,
-                &mut Cell::default_finalizer(),
+                &mut Cell::empty_context(),
             )?;
             self.result = new_root;
         };
@@ -421,7 +416,7 @@ impl LoopContImpl for DictMergeCont {
                 key.bit_len(),
                 &value.as_full_slice(),
                 SetMode::Set,
-                &mut Cell::default_finalizer(),
+                &mut Cell::empty_context(),
             )?;
             self.result = new_root;
         }

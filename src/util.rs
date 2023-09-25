@@ -1,9 +1,11 @@
+use std::sync::OnceLock;
+
 use anyhow::Result;
 use crc::Crc;
 use everscale_types::cell::MAX_BIT_LEN;
 use everscale_types::prelude::*;
-use num_bigint::BigInt;
-use num_traits::{Num, ToPrimitive};
+use num_bigint::{BigInt, BigUint, Sign};
+use num_traits::{Num, One, ToPrimitive, Zero};
 use unicode_segmentation::UnicodeSegmentation;
 
 pub const CRC_16: Crc<u16> = Crc::<u16>::new(&crc::CRC_16_XMODEM);
@@ -287,6 +289,30 @@ pub fn decode_binary_bitstring(s: &str) -> Result<CellBuilder> {
     Ok(builder)
 }
 
+pub fn bitsize(int: &BigInt, signed: bool) -> u16 {
+    fn minus_one() -> &'static BigInt {
+        static MINUS_ONE: OnceLock<BigInt> = OnceLock::new();
+        MINUS_ONE.get_or_init(|| BigInt::from_biguint(Sign::Minus, BigUint::one()))
+    }
+
+    let mut bits = int.bits() as u16;
+    if signed {
+        if int.is_zero() || int == minus_one() {
+            return 1;
+        } else if int.sign() == Sign::Plus {
+            return bits + 1;
+        }
+
+        let mut modpow2 = int.magnitude().clone();
+        modpow2 &= &modpow2 - 1u32;
+        if !modpow2.is_zero() {
+            bits += 1;
+        }
+    }
+
+    bits
+}
+
 pub fn store_int_to_builder(
     builder: &mut CellBuilder,
     int: &BigInt,
@@ -295,10 +321,11 @@ pub fn store_int_to_builder(
 ) -> Result<()> {
     use std::borrow::Cow;
 
+    let int_bits = bitsize(int, signed);
     anyhow::ensure!(
-        int.bits() <= bits as u64,
+        int_bits <= bits,
         "Integer does not fit into cell: {} bits out of {bits}",
-        int.bits()
+        int_bits
     );
 
     match int.to_u64() {

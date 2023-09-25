@@ -366,7 +366,7 @@ impl StringUtils {
         let int = stack.pop_int()?;
         anyhow::ensure!(bits % 8 == 0, "Can store only an integer number of bytes");
         anyhow::ensure!(
-            int.bits() <= bits as _,
+            bitsize(&int, sgn) <= bits as _,
             "Integer does not fit into the buffer"
         );
 

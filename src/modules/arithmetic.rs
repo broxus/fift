@@ -6,6 +6,7 @@ use num_integer::Integer;
 use num_traits::{One, Signed, Zero};
 
 use crate::core::*;
+use crate::util::bitsize;
 
 pub struct Arithmetic;
 
@@ -283,8 +284,8 @@ impl Arithmetic {
     fn interpret_fits(stack: &mut Stack, signed: bool) -> Result<()> {
         let y = stack.pop_smallint_range(0, 1023)? as u16;
         let x = stack.pop_int()?;
-        let bits = x.bits() + signed as u64;
-        stack.push_bool(bits <= y as u64)
+        let bits = bitsize(&x, signed);
+        stack.push_bool(bits <= y)
     }
 }
 
