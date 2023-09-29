@@ -58,5 +58,6 @@ define_libs!(
         lists => "Lists.fif",
         stack => "Stack.fif",
         ton_util => "TonUtil.fif",
+        get_opt => "GetOpt.fif",
     ]
 );

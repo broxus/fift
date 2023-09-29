@@ -2,7 +2,7 @@
 name = "fift-cli"
 description = "A CLI for the Fift esoteric language interpreter"
 repository = "https://github.com/broxus/fift"
-version = "0.1.21"
+version = "0.1.22"
 edition = "2021"
 rust-version = "1.70"
 include = ["src/**/*.rs", "src/**/*.fif", "LICENSE", "README.md"]
@@ -21,4 +21,4 @@ rustyline = { version = "12.0", default-features = false }
 unicode-width = "0.1"
 
 fift = { path = "..", version = "=0.1.21" }
-fift-libs = { path = "../libs", version = "0.1.19" }
+fift-libs = { path = "../libs", version = "0.1.22" }
