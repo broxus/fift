@@ -127,7 +127,6 @@ variable base
 { count } : []len
 { tpop } : []pop
 
-/* UNIMPLEMENTED
 { 0x40 runvmx } : runvmcode
 { 0x48 runvmx } : gasrunvmcode
 { 0xc8 runvmx } : gas2runvmcode
@@ -145,4 +144,3 @@ variable base
 { 0xfd runvmx } : gas2runvmctxact
 { 0x35 runvmx } : runvmctxactq
 { 0x3d runvmx } : gasrunvmctxactq
-*/

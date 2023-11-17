@@ -66,7 +66,7 @@ impl DictUtils {
     #[cmd(name = "b>idict!", stack, args(b = true, mode = SetMode::Set, key = KeyMode::Signed))]
     fn interpret_dict_add(stack: &mut Stack, b: bool, mode: SetMode, key: KeyMode) -> Result<()> {
         let bits = stack.pop_smallint_range(0, MAX_KEY_BITS)? as u16;
-        let cell = pop_maybe_cell(stack)?;
+        let mut cell = pop_maybe_cell(stack)?;
         let key = pop_dict_key(stack, key, bits)?;
         anyhow::ensure!(
             key.range().remaining_bits() >= bits,
@@ -81,8 +81,8 @@ impl DictUtils {
         let value = value.apply()?;
 
         let mut key = key.apply()?.get_prefix(bits, 0);
-        let dict = dict_insert(
-            cell.as_ref(),
+        let res = dict_insert(
+            &mut cell,
             &mut key,
             bits,
             &value,
@@ -91,8 +91,8 @@ impl DictUtils {
         );
 
         // TODO: use operation result flag?
-        let res = dict.is_ok();
-        if let Ok((cell, _)) = dict {
+        let res = res.is_ok();
+        if res {
             stack.push_opt(cell)?;
         }
         stack.push_bool(res)
@@ -133,7 +133,7 @@ impl DictUtils {
     #[cmd(name = "idict-", stack, args(key = KeyMode::Signed, ignore = true))]
     fn interpret_dict_remove(stack: &mut Stack, key: KeyMode, ignore: bool) -> Result<()> {
         let bits = stack.pop_smallint_range(0, MAX_KEY_BITS)? as u16;
-        let dict = pop_maybe_cell(stack)?;
+        let mut dict = pop_maybe_cell(stack)?;
         let key = pop_dict_key(stack, key, bits)?;
         anyhow::ensure!(
             key.range().remaining_bits() >= bits,
@@ -141,13 +141,9 @@ impl DictUtils {
         );
 
         let key = &mut key.apply()?.get_prefix(bits, 0);
-        let value =
-            dict_remove_owned(dict.as_ref(), key, bits, false, &mut Cell::empty_context()).ok();
-
-        let (dict, value) = match value {
-            Some((dict, value)) => (dict, value),
-            None => (dict.clone(), None),
-        };
+        let value = dict_remove_owned(&mut dict, key, bits, false, &mut Cell::empty_context())
+            .ok()
+            .flatten();
 
         stack.push_opt(dict)?;
 
@@ -267,15 +263,14 @@ impl LoopContImpl for DictMapCont {
                 .context("Uninitialized dictmap iterator")?;
 
             let value = ctx.stack.pop_builder()?;
-            let (new_root, _) = dict_insert(
-                self.result.as_ref(),
+            dict_insert(
+                &mut self.result,
                 &mut key.as_data_slice(),
                 key.bit_len(),
                 &value.as_full_slice(),
                 SetMode::Set,
                 &mut Cell::empty_context(),
             )?;
-            self.result = new_root;
         }
 
         Ok(self.iter.peek().is_some())
@@ -381,15 +376,14 @@ impl LoopContImpl for DictMergeCont {
                 },
             };
             let (key, value) = iter.next().unwrap()?;
-            let (new_root, _) = dict_insert(
-                self.result.as_ref(),
+            dict_insert(
+                &mut self.result,
                 &mut key.as_data_slice(),
                 key.bit_len(),
                 &value.apply()?,
                 SetMode::Set,
                 &mut Cell::empty_context(),
             )?;
-            self.result = new_root;
         };
 
         let (key, left) = left_iter.next().unwrap()?;
@@ -410,15 +404,14 @@ impl LoopContImpl for DictMergeCont {
                 .context("Uninitialized dictmerge iterator")?;
 
             let value = ctx.stack.pop_builder()?;
-            let (new_root, _) = dict_insert(
-                self.result.as_ref(),
+            dict_insert(
+                &mut self.result,
                 &mut key.as_data_slice(),
                 key.bit_len(),
                 &value.as_full_slice(),
                 SetMode::Set,
                 &mut Cell::empty_context(),
             )?;
-            self.result = new_root;
         }
 
         Ok(true)
