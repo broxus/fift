@@ -772,7 +772,7 @@ impl ContImpl for StackWordFunc {
     }
 }
 
-/// === impl Context ===
+// === impl Context ===
 
 impl Context<'_> {
     fn insert_before_next(&mut self, cont: &mut Option<Cont>) {

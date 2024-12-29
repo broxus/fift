@@ -132,7 +132,7 @@ impl CellUtils {
         let mut cb1 = stack.pop_builder()?;
         {
             let cb1 = Rc::make_mut(&mut cb1);
-            cb1.store_raw(cb2.raw_data(), cb2.bit_len())?;
+            cb1.store_raw(cb2.raw_data(), cb2.size_bits())?;
             for cell in cb2.references() {
                 cb1.store_reference(cell.clone())?;
             }
@@ -146,7 +146,7 @@ impl CellUtils {
     fn interpret_builder_bitrefs(stack: &mut Stack, bits: bool, refs: bool) -> Result<()> {
         let cb = stack.pop_builder()?;
         if bits {
-            stack.push_int(cb.bit_len())?;
+            stack.push_int(cb.size_bits())?;
         }
         if refs {
             stack.push_int(cb.references().len())?;
@@ -160,7 +160,7 @@ impl CellUtils {
     fn interpret_builder_rem_bitrefs(stack: &mut Stack, bits: bool, refs: bool) -> Result<()> {
         let cb = stack.pop_builder()?;
         if bits {
-            stack.push_int(MAX_BIT_LEN - cb.bit_len())?;
+            stack.push_int(MAX_BIT_LEN - cb.size_bits())?;
         }
         if refs {
             stack.push_int(MAX_REF_COUNT - cb.references().len())?;
@@ -207,9 +207,9 @@ impl CellUtils {
         let mut cs_raw = stack.pop_slice()?;
 
         let mut range = cs_raw.range();
-        if !range.try_advance(bits, refs) {
+        if let Err(e) = range.skip_first(bits, refs) {
             if !quiet {
-                anyhow::bail!(everscale_types::error::Error::CellUnderflow);
+                anyhow::bail!(e);
             }
             if adv {
                 stack.push_raw(cs_raw)?;
@@ -385,10 +385,10 @@ impl CellUtils {
     fn interpret_slice_bitrefs(stack: &mut Stack, bits: bool, refs: bool) -> Result<()> {
         let cs = stack.pop_slice()?;
         if bits {
-            stack.push_int(cs.range().remaining_bits())?;
+            stack.push_int(cs.range().size_bits())?;
         }
         if refs {
-            stack.push_int(cs.range().remaining_refs())?;
+            stack.push_int(cs.range().size_refs())?;
         }
         Ok(())
     }
@@ -461,7 +461,7 @@ impl CellUtils {
         let cell = stack.pop_cell()?;
 
         let mut result = Vec::new();
-        BocHeader::<ahash::RandomState>::new(&**cell)
+        BocHeader::<ahash::RandomState>::with_root(&**cell)
             .with_crc(mode & MODE_WITH_CRC != 0)
             .encode(&mut result);
 
@@ -532,8 +532,8 @@ impl<'a> StorageStat<'a> {
     }
 
     fn add_slice<'b: 'a>(&mut self, slice: &'a CellSlice<'b>) -> bool {
-        self.bits = self.bits.saturating_add(slice.remaining_bits() as u64);
-        self.refs = self.refs.saturating_add(slice.remaining_refs() as u64);
+        self.bits = self.bits.saturating_add(slice.size_bits() as u64);
+        self.refs = self.refs.saturating_add(slice.size_refs() as u64);
 
         for cell in slice.references() {
             if !self.add_cell(cell) {

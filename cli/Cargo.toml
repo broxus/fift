@@ -17,8 +17,8 @@ anyhow = "1.0"
 argh = "0.1"
 bitflags = "2.3"
 console = "0.15"
-rustyline = { version = "12.0", default-features = false }
-unicode-width = "0.1"
+rustyline = { version = "15.0", default-features = false }
+unicode-width = "0.2"
 
 fift = { path = "..", version = "=0.1.23" }
 fift-libs = { path = "../libs", version = "0.1.23" }

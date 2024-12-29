@@ -1,11 +1,9 @@
-use std::sync::OnceLock;
-
 use anyhow::Result;
 use crc::Crc;
 use everscale_types::cell::MAX_BIT_LEN;
 use everscale_types::prelude::*;
-use num_bigint::{BigInt, BigUint, Sign};
-use num_traits::{Num, One, ToPrimitive, Zero};
+use num_bigint::{BigInt, Sign};
+use num_traits::{Num, ToPrimitive};
 use unicode_segmentation::UnicodeSegmentation;
 
 pub const CRC_16: Crc<u16> = Crc::<u16>::new(&crc::CRC_16_XMODEM);
@@ -160,8 +158,7 @@ impl std::fmt::Display for DisplayCellSlice<'_, '_> {
             writeln!(f, "{:indent$}{}", "", DisplaySliceData(&cs))?;
 
             for cell in cs.references().rev() {
-                // SAFETY: it is safe to print pruned branches
-                let cs = unsafe { cell.as_slice_unchecked() };
+                let cs = cell.as_slice_allow_pruned();
                 stack.push((indent + 1, cs));
             }
         }
@@ -182,7 +179,7 @@ impl std::fmt::Display for DisplaySliceData<'_, '_> {
 
         let mut buffer: [u8; 128] = [0; 128];
 
-        let bits = cs.remaining_bits();
+        let bits = cs.size_bits();
         cs.load_raw(&mut buffer, bits)
             .map_err(|_| std::fmt::Error)?;
         append_tag(&mut buffer, bits);
@@ -290,27 +287,25 @@ pub fn decode_binary_bitstring(s: &str) -> Result<CellBuilder> {
 }
 
 pub fn bitsize(int: &BigInt, signed: bool) -> u16 {
-    fn minus_one() -> &'static BigInt {
-        static MINUS_ONE: OnceLock<BigInt> = OnceLock::new();
-        MINUS_ONE.get_or_init(|| BigInt::from_biguint(Sign::Minus, BigUint::one()))
-    }
-
     let mut bits = int.bits() as u16;
     if signed {
-        if int.is_zero() || int == minus_one() {
-            return 1;
-        } else if int.sign() == Sign::Plus {
-            return bits + 1;
+        match int.sign() {
+            Sign::NoSign => bits,
+            Sign::Plus => bits + 1,
+            Sign::Minus => {
+                // Check if `int` magnitude is not a power of 2
+                let mut digits = int.iter_u64_digits().rev();
+                if let Some(hi) = digits.next() {
+                    if !hi.is_power_of_two() || !digits.all(|digit| digit == 0) {
+                        bits += 1;
+                    }
+                }
+                bits
+            }
         }
-
-        let mut modpow2 = int.magnitude().clone();
-        modpow2 &= &modpow2 - 1u32;
-        if !modpow2.is_zero() {
-            bits += 1;
-        }
+    } else {
+        bits
     }
-
-    bits
 }
 
 pub fn store_int_to_builder(

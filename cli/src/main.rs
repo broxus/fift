@@ -47,6 +47,7 @@ struct App {
     source_files: Vec<String>,
 }
 
+#[allow(unused)]
 #[derive(Default)]
 struct ScriptModeDelim;
 

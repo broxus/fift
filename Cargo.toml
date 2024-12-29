@@ -17,7 +17,7 @@ members = ["proc", "cli", "libs"]
 [dependencies]
 ahash = "0.8"
 anyhow = "1.0"
-base64 = "0.21"
+base64 = "0.22"
 crc = "3.0"
 dyn-clone = "1.0"
 everscale-crypto = "0.2"
@@ -30,10 +30,13 @@ sha2 = "0.10"
 thiserror = "1.0"
 unicode-segmentation = "1.0"
 
-everscale-types = { version = "0.1.0-rc.6", default-features = false, features = [
+everscale-types = { version = "0.1.2", default-features = false, features = [
     "sync",
     "base64",
     "models",
 ] }
 
 fift-proc = { path = "./proc", version = "=0.1.15" }
+
+[patch.crates-io]
+everscale-types = { git = "https://github.com/broxus/everscale-types.git", rev = "6e3c289f9bbf46337b11b24656a9c87ce409323e" }

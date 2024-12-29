@@ -744,7 +744,7 @@ struct DispatchTable {
 
 impl DispatchTable {
     fn get_opcode_from_slice(slice: &CellSlice<'_>) -> (u32, u16) {
-        let bits = std::cmp::min(MAX_OPCODE_BITS, slice.remaining_bits());
+        let bits = std::cmp::min(MAX_OPCODE_BITS, slice.size_bits());
         let opcode = (slice.get_uint(0, bits).unwrap() as u32) << (MAX_OPCODE_BITS - bits);
         (opcode, bits)
     }
@@ -992,7 +992,7 @@ impl Opcode for SimpleOpcode {
         f: &mut dyn std::fmt::Write,
     ) -> Result<()> {
         if bits >= self.bits {
-            slice.try_advance(self.bits, 0);
+            slice.skip_first(self.bits, 0)?;
             f.write_str(self.name)?;
         }
         Ok(())
@@ -1023,7 +1023,7 @@ impl Opcode for FixedOpcode {
         f: &mut dyn std::fmt::Write,
     ) -> Result<()> {
         if bits >= self.total_bits {
-            slice.try_advance(self.total_bits, 0);
+            slice.skip_first(self.total_bits, 0)?;
             (self.dump)(slice, opcode >> (MAX_OPCODE_BITS - self.total_bits), f)?;
         }
         Ok(())
@@ -1253,7 +1253,7 @@ fn dump_push_int(
         return Ok(());
     }
 
-    cs.try_advance(bits, 0);
+    cs.skip_first(bits, 0)?;
 
     let mut bytes = [0u8; 33];
     let rem = value_len % 8;
@@ -1276,7 +1276,7 @@ fn dump_push_ref(name: &'static str) -> Box<FnDumpInstr> {
         if !cs.has_remaining(0, 1) {
             return Ok(());
         }
-        cs.try_advance(bits, 0);
+        cs.skip_first(bits, 0)?;
         let cell = cs.load_reference()?;
         write!(f, "{name} ({})", cell.repr_hash())?;
         Ok(())
@@ -1296,7 +1296,7 @@ fn dump_push_ref2(name: &'static str) -> Box<FnDumpInstr> {
         if !cs.has_remaining(0, 2) {
             return Ok(());
         }
-        cs.try_advance(bits, 0);
+        cs.skip_first(bits, 0)?;
         let cell1 = cs.load_reference()?;
         let cell2 = cs.load_reference()?;
         write!(f, "{name} ({}) ({})", cell1.repr_hash(), cell2.repr_hash())?;
@@ -1327,7 +1327,7 @@ fn dump_if_bit_jmpref(
     if cs.is_refs_empty() {
         return Ok(());
     }
-    cs.try_advance(bits, 1);
+    cs.skip_first(bits, 1)?;
     let neg = if args & 0x20 != 0 { "N" } else { "" };
     write!(f, "IF{neg}BITJMPREF {}", args & 0x1f)?;
     Ok(())
@@ -1422,9 +1422,9 @@ fn dump_push_const_dict(name: &'static str) -> Box<FnDumpInstr> {
         if !cs.has_remaining(bits, 1) {
             return Ok(());
         }
-        cs.try_advance(bits - 11, 0);
+        cs.skip_first(bits - 11, 0)?;
         let slice = cs.get_prefix(1, 1);
-        cs.try_advance(1, 1);
+        cs.skip_first(1, 1)?;
         let n = cs.load_uint(10)?;
 
         write!(f, "{name} {n} (x{})", slice.display_data())?;
@@ -1549,14 +1549,14 @@ fn dump_push_slice_ext(
     if !cs.has_remaining(bits + slice_bits, slice_refs) {
         return Ok(());
     }
-    cs.try_advance(bits, 0);
+    cs.skip_first(bits, 0)?;
     let mut slice = cs.get_prefix(slice_bits, slice_refs);
-    cs.try_advance(slice_bits, slice_refs);
+    cs.skip_first(slice_bits, slice_refs)?;
     slice_trim_end(&mut slice)?;
 
     write!(f, "{name} x{}", slice.display_data())?;
     if !slice.is_refs_empty() {
-        write!(f, ",{}", slice.remaining_refs())?;
+        write!(f, ",{}", slice.size_refs())?;
     }
     Ok(())
 }
@@ -1581,14 +1581,14 @@ fn dump_dummy_debug_str(
     if !cs.has_remaining(bits + slice_bits, 0) {
         return Ok(());
     }
-    cs.try_advance(bits, 0);
+    cs.skip_first(bits, 0)?;
     let mut slice = cs.get_prefix(slice_bits, 0);
-    cs.try_advance(slice_bits, 0);
+    cs.skip_first(slice_bits, 0)?;
     slice_trim_end(&mut slice)?;
 
     write!(f, "DEBUGSTR x{}", slice.display_data())?;
     if !slice.is_refs_empty() {
-        write!(f, ",{}", slice.remaining_refs())?;
+        write!(f, ",{}", slice.size_refs())?;
     }
     Ok(())
 }
@@ -1638,7 +1638,7 @@ fn dump_store_cont_ref(
     if !cs.has_remaining(0, refs) {
         return Ok(());
     }
-    cs.try_advance(bits, refs);
+    cs.skip_first(bits, refs)?;
     if refs > 1 {
         write!(f, "STREF{refs}CONST")?;
     } else {
@@ -1861,7 +1861,7 @@ fn dump_shldivmod(has_y: bool, quiet: bool) -> Box<FnDumpArgInstr> {
 }
 
 fn slice_trim_end(slice: &mut CellSlice<'_>) -> Result<()> {
-    let bits = slice.remaining_bits();
+    let bits = slice.size_bits();
     if bits == 0 {
         return Ok(());
     }
@@ -1869,12 +1869,12 @@ fn slice_trim_end(slice: &mut CellSlice<'_>) -> Result<()> {
     if bits != trailing {
         trailing = trailing.saturating_add(1);
     }
-    *slice = slice.get_prefix(bits - trailing, slice.remaining_refs());
+    *slice = slice.get_prefix(bits - trailing, slice.size_refs());
     Ok(())
 }
 
 fn slice_trailing_zeros(slice: &CellSlice<'_>) -> Result<u16> {
-    let mut bits = slice.remaining_bits();
+    let mut bits = slice.size_bits();
     if bits == 0 {
         return Ok(0);
     }

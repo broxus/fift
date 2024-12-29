@@ -426,8 +426,8 @@ define_stack_value! {
         Builder(CellBuilder) = {
             eq(a, b) = a == b,
             fmt_dump(v, f) = {
-                let bytes = (v.bit_len() + 7) / 8;
-                write!(f, "BC{{{}, bits={}}}", hex::encode(&v.raw_data()[..bytes as usize]), v.bit_len())
+                let bytes = (v.size_bits() + 7) / 8;
+                write!(f, "BC{{{}, bits={}}}", hex::encode(&v.raw_data()[..bytes as usize]), v.size_bits())
             },
             as_builder(v): &CellBuilder = Ok(v),
             into_builder,
@@ -642,7 +642,7 @@ impl From<CellSliceParts> for OwnedCellSlice {
 impl PartialEq<CellSlice<'_>> for OwnedCellSlice {
     fn eq(&self, right: &CellSlice<'_>) -> bool {
         if let Ok(left) = self.apply() {
-            if let Ok(std::cmp::Ordering::Equal) = left.cmp_by_content(right) {
+            if let Ok(std::cmp::Ordering::Equal) = left.lex_cmp(right) {
                 return true;
             }
         }

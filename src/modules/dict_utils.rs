@@ -69,7 +69,7 @@ impl DictUtils {
         let mut cell = pop_maybe_cell(stack)?;
         let key = pop_dict_key(stack, key, bits)?;
         anyhow::ensure!(
-            key.range().remaining_bits() >= bits,
+            key.range().size_bits() >= bits,
             "Not enough bits for a dictionary key"
         );
 
@@ -106,7 +106,7 @@ impl DictUtils {
         let cell = pop_maybe_cell(stack)?;
         let key = pop_dict_key(stack, key, bits)?;
         anyhow::ensure!(
-            key.range().remaining_bits() >= bits,
+            key.range().size_bits() >= bits,
             "Not enough bits for a dictionary key"
         );
 
@@ -136,7 +136,7 @@ impl DictUtils {
         let mut dict = pop_maybe_cell(stack)?;
         let key = pop_dict_key(stack, key, bits)?;
         anyhow::ensure!(
-            key.range().remaining_bits() >= bits,
+            key.range().size_bits() >= bits,
             "Not enough bits for a dictionary key"
         );
 
@@ -266,7 +266,7 @@ impl LoopContImpl for DictMapCont {
             dict_insert(
                 &mut self.result,
                 &mut key.as_data_slice(),
-                key.bit_len(),
+                key.size_bits(),
                 &value.as_full_slice(),
                 SetMode::Set,
                 &mut Cell::empty_context(),
@@ -305,7 +305,7 @@ impl LoopContImpl for DictDiffCont {
                         let (key, left_value) = self.left.next().unwrap()?;
                         let (_, right_value) = self.right.next().unwrap()?;
 
-                        if left_value.apply()?.cmp_by_content(&right_value.apply()?)?
+                        if left_value.apply()?.lex_cmp(&right_value.apply()?)?
                             == std::cmp::Ordering::Equal
                         {
                             continue;
@@ -379,7 +379,7 @@ impl LoopContImpl for DictMergeCont {
             dict_insert(
                 &mut self.result,
                 &mut key.as_data_slice(),
-                key.bit_len(),
+                key.size_bits(),
                 &value.apply()?,
                 SetMode::Set,
                 &mut Cell::empty_context(),
@@ -407,7 +407,7 @@ impl LoopContImpl for DictMergeCont {
             dict_insert(
                 &mut self.result,
                 &mut key.as_data_slice(),
-                key.bit_len(),
+                key.size_bits(),
                 &value.as_full_slice(),
                 SetMode::Set,
                 &mut Cell::empty_context(),
@@ -465,7 +465,8 @@ impl OwnedDictIter {
 
         // SAFETY: iter lifetime is bounded to the `DynCell` which lives as long
         // as `Cell` lives. By storing root we guarantee that it will live enough.
-        let inner = unsafe { std::mem::transmute::<_, dict::RawIter<'static>>(inner) };
+        let inner =
+            unsafe { std::mem::transmute::<dict::RawIter<'_>, dict::RawIter<'static>>(inner) };
 
         Self { root, inner }
     }
@@ -518,7 +519,7 @@ fn pop_dict_key(stack: &mut Stack, key_mode: KeyMode, bits: u16) -> Result<Owned
 }
 
 fn builder_to_int(builder: &CellBuilder, signed: bool) -> Result<BigInt> {
-    let bits = builder.bit_len();
+    let bits = builder.size_bits();
     anyhow::ensure!(
         bits <= (256 + signed as u16),
         "Key does not fit into integer"
