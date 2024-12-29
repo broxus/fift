@@ -142,9 +142,9 @@ impl StackUtils {
     fn interpret_cond_dup(stack: &mut Stack) -> Result<()> {
         let item = stack.pop_int()?;
         if !item.is_zero() {
-            stack.push_raw(item.clone())?;
+            stack.push_raw(item.clone().into_dyn_fift_value())?;
         }
-        stack.push_raw(item)
+        stack.push_raw(item.into_dyn_fift_value())
     }
 
     /// === Low-level stack manipulation ===
@@ -159,8 +159,10 @@ impl StackUtils {
 
         match (x, y) {
             (0, 0) => stack.push(cont::NopCont::instance()),
-            (0, 1) => stack.push(Rc::new(interpret_swap as cont::StackWordFunc) as Cont),
-            _ => stack.push(Rc::new(XchgCont { x, y }) as Cont),
+            (0, 1) => stack.push(Cont::new_dyn_fift_cont(
+                interpret_swap as cont::StackWordFunc,
+            )),
+            _ => stack.push(Cont::new_dyn_fift_cont(XchgCont { x, y })),
         }
     }
 
@@ -168,9 +170,13 @@ impl StackUtils {
     fn interpret_make_push(stack: &mut Stack) -> Result<()> {
         let x = stack.pop_smallint_range(0, 255)?;
         match x {
-            0 => stack.push(Rc::new(interpret_dup as cont::StackWordFunc) as Cont),
-            1 => stack.push(Rc::new(interpret_over as cont::StackWordFunc) as Cont),
-            _ => stack.push(Rc::new(PushCont(x)) as Cont),
+            0 => stack.push(Cont::new_dyn_fift_cont(
+                interpret_dup as cont::StackWordFunc,
+            )),
+            1 => stack.push(Cont::new_dyn_fift_cont(
+                interpret_over as cont::StackWordFunc,
+            )),
+            _ => stack.push(Cont::new_dyn_fift_cont(PushCont(x))),
         }
     }
 
@@ -178,9 +184,13 @@ impl StackUtils {
     fn interpret_make_pop(stack: &mut Stack) -> Result<()> {
         let x = stack.pop_smallint_range(0, 255)?;
         match x {
-            0 => stack.push(Rc::new(interpret_drop as cont::StackWordFunc) as Cont),
-            1 => stack.push(Rc::new(interpret_nip as cont::StackWordFunc) as Cont),
-            _ => stack.push(Rc::new(PopCont(x)) as Cont),
+            0 => stack.push(Cont::new_dyn_fift_cont(
+                interpret_drop as cont::StackWordFunc,
+            )),
+            1 => stack.push(Cont::new_dyn_fift_cont(
+                interpret_nip as cont::StackWordFunc,
+            )),
+            _ => stack.push(Cont::new_dyn_fift_cont(PopCont(x))),
         }
     }
 }

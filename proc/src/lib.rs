@@ -169,10 +169,10 @@ fn process_cmd_definition(
 fn find_command_args(function: &syn::ImplItemFn) -> Result<Vec<String>, Error> {
     let mut inputs = function.sig.inputs.iter();
 
-    if let Some(first) = inputs.next() {
-        if !matches!(first, syn::FnArg::Typed(_)) {
-            return Err(Error::custom("Command context argument not found").with_span(&function));
-        }
+    if let Some(first) = inputs.next()
+        && !matches!(first, syn::FnArg::Typed(_))
+    {
+        return Err(Error::custom("Command context argument not found").with_span(&function));
     }
 
     let mut args = Vec::new();

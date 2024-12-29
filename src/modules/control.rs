@@ -1,6 +1,7 @@
 use std::rc::Rc;
 
 use anyhow::{Context as _, Result};
+use tycho_vm::SafeRc;
 
 use crate::core::*;
 use crate::error::{ExecutionAborted, UnexpectedEof};
@@ -12,15 +13,17 @@ pub struct Control;
 impl Control {
     #[init]
     fn init(&self, d: &mut Dictionary) -> Result<()> {
-        d.define_word("'exit-interpret ", Rc::new(ExitInterpretCont))?;
+        d.define_word("'exit-interpret ", SafeRc::new(ExitInterpretCont))?;
 
         d.define_word(
             "Fift-wordlist ",
-            Rc::new(cont::LitCont(d.get_words_box().clone())),
+            SafeRc::new(cont::LitCont(
+                d.get_words_box().clone().into_dyn_fift_value(),
+            )),
         )?;
         d.define_word(
             "Fift ",
-            Rc::new(ResetContextCont(d.get_words_box().clone())),
+            SafeRc::new(ResetContextCont(d.get_words_box().clone())),
         )?;
 
         Ok(())
@@ -53,7 +56,7 @@ impl Control {
             0 => None,
             1 => Some(body),
             _ => {
-                ctx.next = Some(Rc::new(cont::TimesCont {
+                ctx.next = Some(SafeRc::new_dyn_fift_cont(cont::TimesCont {
                     body: Some(body.clone()),
                     after: ctx.next.take(),
                     count: count - 1,
@@ -98,7 +101,7 @@ impl Control {
     fn interpret_while(ctx: &mut Context) -> Result<Option<Cont>> {
         let body = ctx.stack.pop_cont_owned()?;
         let cond = ctx.stack.pop_cont_owned()?;
-        ctx.next = Some(Rc::new(cont::WhileCont {
+        ctx.next = Some(Cont::new_dyn_fift_cont(cont::WhileCont {
             condition: Some(cond.clone()),
             body: Some(body),
             after: ctx.next.take(),
@@ -110,7 +113,7 @@ impl Control {
     #[cmd(name = "until", tail)]
     fn interpret_until(ctx: &mut Context) -> Result<Option<Cont>> {
         let body = ctx.stack.pop_cont_owned()?;
-        ctx.next = Some(Rc::new(cont::UntilCont {
+        ctx.next = Some(SafeRc::new_dyn_fift_cont(cont::UntilCont {
             body: Some(body.clone()),
             after: ctx.next.take(),
         }));
@@ -153,7 +156,7 @@ impl Control {
     #[cmd(name = "(})")]
     fn interpret_wordlist_end_aux(ctx: &mut Context) -> Result<()> {
         let word_list = ctx.stack.pop_word_list()?;
-        ctx.stack.push(word_list.finish())
+        ctx.stack.push(SafeRc::into_inner(word_list).finish())
     }
 
     #[cmd(name = "(compile)")]
@@ -255,7 +258,7 @@ impl Control {
             // Just push token otherwise
             word.clear();
             word.push_str(token);
-            //ctx.input.scan_skip_whitespace()?;
+            // ctx.input.scan_skip_whitespace()?;
             (word, None)
         };
 
@@ -317,7 +320,9 @@ impl Control {
     #[cmd(name = "::_", active, args(active = true, prefix = true))]
     fn interpret_colon(ctx: &mut Context, active: bool, prefix: bool) -> Result<()> {
         thread_local! {
-            static CREATE_AUX: Cont = Rc::new((|ctx| interpret_create_aux(ctx, None)) as cont::ContextWordFunc);
+            static CREATE_AUX: Cont = Cont::new_dyn_fift_cont(
+                (|ctx| interpret_create_aux(ctx, None)) as cont::ContextWordFunc
+            );
         };
 
         let name = ctx.input.scan_word()?.ok_or(UnexpectedEof)?;
@@ -354,7 +359,7 @@ impl Control {
     #[cmd(name = "current@")]
     fn interpret_get_current(ctx: &mut Context) -> Result<()> {
         let words = ctx.dicts.current.get_words_box().clone();
-        ctx.stack.push_raw(words)
+        ctx.stack.push_raw(words.into_dyn_fift_value())
     }
 
     #[cmd(name = "current!")]
@@ -367,7 +372,7 @@ impl Control {
     #[cmd(name = "context@")]
     fn interpret_get_context(ctx: &mut Context) -> Result<()> {
         let words = ctx.dicts.context.get_words_box().clone();
-        ctx.stack.push_raw(words)
+        ctx.stack.push_raw(words.into_dyn_fift_value())
     }
 
     #[cmd(name = "context!")]
@@ -446,8 +451,11 @@ impl Control {
             );
         }
 
-        ctx.next = cont::SeqCont::make(Some(Rc::new(ExitSourceBlockCont)), ctx.next.take());
-        Ok(Some(Rc::new(cont::InterpreterCont)))
+        ctx.next = cont::SeqCont::make(
+            Some(Cont::new_dyn_fift_cont(ExitSourceBlockCont)),
+            ctx.next.take(),
+        );
+        Ok(Some(Cont::new_dyn_fift_cont(cont::InterpreterCont)))
     }
 
     #[cmd(name = "skip-to-eof", tail)]
@@ -495,13 +503,10 @@ fn define_word(d: &mut Dictionary, mut word: String, cont: Cont, mode: DefMode) 
     if !mode.prefix {
         word.push(' ');
     }
-    d.define_word(
-        word,
-        DictionaryEntry {
-            definition: cont,
-            active: mode.active,
-        },
-    )
+    d.define_word(word, DictionaryEntry {
+        definition: cont,
+        active: mode.active,
+    })
 }
 
 #[derive(Default)]
@@ -510,7 +515,7 @@ struct DefMode {
     prefix: bool,
 }
 
-struct ResetContextCont(Rc<SharedBox>);
+struct ResetContextCont(SafeRc<SharedBox>);
 
 impl cont::ContImpl for ResetContextCont {
     fn run(self: Rc<Self>, ctx: &mut Context) -> Result<Option<Cont>> {

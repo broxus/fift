@@ -4,10 +4,9 @@ use std::process::ExitCode;
 use anyhow::Result;
 use argh::FromArgs;
 use console::style;
-use unicode_width::UnicodeWidthStr;
-
 use fift::core::lexer::LexerPosition;
 use fift::core::{Environment, SourceBlock};
+use unicode_width::UnicodeWidthStr;
 
 use self::env::SystemEnvironment;
 use self::input::LineReader;
@@ -22,6 +21,7 @@ mod modules;
 
 /// A simple Fift interpreter. Type `bye` to quie,
 /// or `words` to get a list of all commands
+#[allow(dead_code)]
 #[derive(FromArgs)]
 struct App {
     /// do not preload standard preamble file `Fift.fif`
@@ -59,7 +59,6 @@ impl RestArgsDelimiter for ScriptModeDelim {
 
 fn main() -> Result<ExitCode> {
     let RestArgs(ArgsOrVersion::<App>(app), rest, ScriptModeDelim) = argh::from_env();
-
     // Prepare system environment
     let mut env = SystemEnvironment::with_include_dirs(
         &app.include

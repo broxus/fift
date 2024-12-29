@@ -46,10 +46,10 @@ impl Lexer {
     }
 
     pub fn scan_until_space_or_eof(&mut self) -> Result<&str> {
-        if let Some(input) = self.blocks.last_mut() {
-            if let Some(word) = input.scan_word()? {
-                return Ok(word);
-            }
+        if let Some(input) = self.blocks.last_mut()
+            && let Some(word) = input.scan_word()?
+        {
+            return Ok(word);
         }
         Ok("")
     }

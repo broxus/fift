@@ -1,11 +1,10 @@
 use std::collections::HashSet;
-use std::rc::Rc;
 
 use anyhow::{Context as _, Result};
-use everscale_types::cell::{MAX_BIT_LEN, MAX_REF_COUNT};
-use everscale_types::prelude::*;
 use num_bigint::{BigInt, Sign};
-use num_traits::Zero;
+use tycho_types::cell::{MAX_BIT_LEN, MAX_REF_COUNT};
+use tycho_types::prelude::*;
+use tycho_vm::SafeRc;
 
 use crate::core::*;
 use crate::util::*;
@@ -27,55 +26,55 @@ impl CellUtils {
         let bits = stack.pop_smallint_range(0, 1023)? as u16;
         let int = stack.pop_int()?;
         let mut builder = stack.pop_builder()?;
-        store_int_to_builder(Rc::make_mut(&mut builder), &int, bits, signed)?;
-        stack.push_raw(builder)
+        SafeRc::make_mut(&mut builder).store_bigint(&int, bits, signed)?;
+        stack.push_raw(builder.into_dyn_fift_value())
     }
 
     #[cmd(name = "ref,", stack)]
     fn interpret_store_ref(stack: &mut Stack) -> Result<()> {
         let cell = stack.pop_cell()?;
         let mut builder = stack.pop_builder()?;
-        Rc::make_mut(&mut builder).store_reference(cell.as_ref().clone())?;
-        stack.push_raw(builder)
+        SafeRc::make_mut(&mut builder).store_reference(cell.as_ref().clone())?;
+        stack.push_raw(builder.into_dyn_fift_value())
     }
 
     #[cmd(name = "$,", stack)]
     fn interpret_store_str(stack: &mut Stack) -> Result<()> {
         let string = stack.pop_string()?;
         let mut builder = stack.pop_builder()?;
-        Rc::make_mut(&mut builder)
+        SafeRc::make_mut(&mut builder)
             .store_raw(string.as_bytes(), len_as_bits("string", &*string)?)?;
-        stack.push_raw(builder)
+        stack.push_raw(builder.into_dyn_fift_value())
     }
 
     #[cmd(name = "B,", stack)]
     fn interpret_store_bytes(stack: &mut Stack) -> Result<()> {
         let bytes = stack.pop_bytes()?;
         let mut builder = stack.pop_builder()?;
-        Rc::make_mut(&mut builder)
+        SafeRc::make_mut(&mut builder)
             .store_raw(bytes.as_slice(), len_as_bits("byte string", &*bytes)?)?;
-        stack.push_raw(builder)
+        stack.push_raw(builder.into_dyn_fift_value())
     }
 
     #[cmd(name = "s,", stack)]
     fn interpret_store_cellslice(stack: &mut Stack) -> Result<()> {
-        let slice = stack.pop_slice()?;
+        let slice = stack.pop_cell_slice()?;
         let mut builder = stack.pop_builder()?;
-        Rc::make_mut(&mut builder).store_slice(slice.apply()?)?;
-        stack.push_raw(builder)
+        SafeRc::make_mut(&mut builder).store_slice(slice.apply())?;
+        stack.push_raw(builder.into_dyn_fift_value())
     }
 
     #[cmd(name = "sr,", stack)]
     fn interpret_store_cellslice_ref(stack: &mut Stack) -> Result<()> {
-        let slice = stack.pop_slice()?;
+        let slice = stack.pop_cell_slice()?;
         let cell = {
             let mut builder = CellBuilder::new();
-            builder.store_slice(slice.apply()?)?;
+            builder.store_slice(slice.apply())?;
             builder.build()?
         };
         let mut builder = stack.pop_builder()?;
-        Rc::make_mut(&mut builder).store_reference(cell)?;
-        stack.push_raw(builder)
+        SafeRc::make_mut(&mut builder).store_reference(cell)?;
+        stack.push_raw(builder.into_dyn_fift_value())
     }
 
     #[cmd(name = "b>", stack, args(is_exotic = false))]
@@ -92,37 +91,37 @@ impl CellUtils {
         let string = stack.pop_string()?;
         let mut builder = CellBuilder::new();
         builder.store_raw(string.as_bytes(), len_as_bits("slice", &*string)?)?;
-        stack.push(OwnedCellSlice::new(builder.build()?))
+        stack.push(OwnedCellSlice::new_allow_exotic(builder.build()?))
     }
 
     #[cmd(name = "|+", stack)]
     fn interpret_concat_cellslice(stack: &mut Stack) -> Result<()> {
-        let cs2 = stack.pop_slice()?;
-        let cs1 = stack.pop_slice()?;
+        let cs2 = stack.pop_cell_slice()?;
+        let cs1 = stack.pop_cell_slice()?;
         stack.push({
             let mut builder = CellBuilder::new();
-            builder.store_slice(cs1.apply()?)?;
-            builder.store_slice(cs2.apply()?)?;
-            OwnedCellSlice::new(builder.build()?)
+            builder.store_slice(cs1.apply())?;
+            builder.store_slice(cs2.apply())?;
+            OwnedCellSlice::new_allow_exotic(builder.build()?)
         })
     }
 
     #[cmd(name = "|_", stack)]
     fn interpret_concat_cellslice_ref(stack: &mut Stack) -> Result<()> {
-        let cs2 = stack.pop_slice()?;
-        let cs1 = stack.pop_slice()?;
+        let cs2 = stack.pop_cell_slice()?;
+        let cs1 = stack.pop_cell_slice()?;
 
         let cell = {
             let mut builder = CellBuilder::new();
-            builder.store_slice(cs2.apply()?)?;
+            builder.store_slice(cs2.apply())?;
             builder.build()?
         };
 
         stack.push({
             let mut builder = CellBuilder::new();
-            builder.store_slice(cs1.apply()?)?;
+            builder.store_slice(cs1.apply())?;
             builder.store_reference(cell)?;
-            OwnedCellSlice::new(builder.build()?)
+            OwnedCellSlice::new_allow_exotic(builder.build()?)
         })
     }
 
@@ -131,13 +130,13 @@ impl CellUtils {
         let cb2 = stack.pop_builder()?;
         let mut cb1 = stack.pop_builder()?;
         {
-            let cb1 = Rc::make_mut(&mut cb1);
+            let cb1 = SafeRc::make_mut(&mut cb1);
             cb1.store_raw(cb2.raw_data(), cb2.size_bits())?;
             for cell in cb2.references() {
                 cb1.store_reference(cell.clone())?;
             }
         }
-        stack.push_raw(cb1)
+        stack.push_raw(cb1.into_dyn_fift_value())
     }
 
     #[cmd(name = "bbits", stack, args(bits = true, refs = false))]
@@ -186,7 +185,7 @@ impl CellUtils {
     #[cmd(name = "<s", stack)]
     fn interpret_from_cell(stack: &mut Stack) -> Result<()> {
         let item = stack.pop_cell()?;
-        stack.push(OwnedCellSlice::new(item.as_ref().clone()))
+        stack.push(OwnedCellSlice::new_allow_exotic(item.as_ref().clone()))
     }
 
     #[cmd(name = "s@", stack, args(refs = false, adv = false, quiet = false))]
@@ -204,7 +203,7 @@ impl CellUtils {
             0
         };
         let bits = stack.pop_smallint_range(0, MAX_BIT_LEN as u32)? as u16;
-        let mut cs_raw = stack.pop_slice()?;
+        let mut cs_raw = stack.pop_cell_slice()?;
 
         let mut range = cs_raw.range();
         if let Err(e) = range.skip_first(bits, refs) {
@@ -212,7 +211,7 @@ impl CellUtils {
                 anyhow::bail!(e);
             }
             if adv {
-                stack.push_raw(cs_raw)?;
+                stack.push_raw(cs_raw.into_dyn_fift_value())?;
             }
             return stack.push_bool(false);
         }
@@ -222,8 +221,8 @@ impl CellUtils {
         stack.push(sub_cs)?;
 
         if adv {
-            Rc::make_mut(&mut cs_raw).set_range(range);
-            stack.push_raw(cs_raw)?;
+            SafeRc::make_mut(&mut cs_raw).set_range(range);
+            stack.push_raw(cs_raw.into_dyn_fift_value())?;
         }
 
         if quiet {
@@ -242,35 +241,10 @@ impl CellUtils {
     #[cmd(name = "u@?+", stack, args(sgn = false, advance = true, quiet = true))]
     fn interpret_load(stack: &mut Stack, sgn: bool, advance: bool, quiet: bool) -> Result<()> {
         let bits = stack.pop_smallint_range(0, 256 + sgn as u32)? as u16;
-        let mut raw_cs = stack.pop_slice()?;
-        let mut cs = raw_cs.apply()?;
+        let mut raw_cs = stack.pop_cell_slice()?;
+        let mut cs = raw_cs.apply();
 
-        let int = match bits {
-            0 => Ok(BigInt::zero()),
-            0..=64 if !sgn => cs.load_uint(bits).map(BigInt::from),
-            0..=64 if sgn => cs.load_uint(bits).map(|mut int| {
-                if bits < 64 {
-                    // Clone sign bit into all high bits
-                    int |= ((int >> (bits - 1)) * u64::MAX) << (bits - 1);
-                }
-                BigInt::from(int as i64)
-            }),
-            _ => {
-                let rem = bits % 8;
-                let mut buffer = [0u8; 33];
-                cs.load_raw(&mut buffer, bits).map(|buffer| {
-                    let mut int = if sgn {
-                        BigInt::from_signed_bytes_be(buffer)
-                    } else {
-                        BigInt::from_bytes_be(Sign::Plus, buffer)
-                    };
-                    if bits % 8 != 0 {
-                        int >>= 8 - rem;
-                    }
-                    int
-                })
-            }
-        };
+        let int = cs.load_bigint(bits, sgn);
         let is_ok = int.is_ok();
 
         match int {
@@ -278,7 +252,7 @@ impl CellUtils {
                 stack.push_int(int)?;
                 if advance {
                     let range = cs.range();
-                    Rc::make_mut(&mut raw_cs).set_range(range);
+                    SafeRc::make_mut(&mut raw_cs).set_range(range);
                 }
             }
             Err(e) if !quiet => return Err(e.into()),
@@ -286,7 +260,7 @@ impl CellUtils {
         }
 
         if advance {
-            stack.push_raw(raw_cs)?;
+            stack.push_raw(raw_cs.into_dyn_fift_value())?;
         }
 
         if quiet {
@@ -305,8 +279,8 @@ impl CellUtils {
     #[cmd(name = "B@?+", stack, args(s = false, advance = true, quiet = true))]
     fn interpret_load_bytes(stack: &mut Stack, s: bool, advance: bool, quiet: bool) -> Result<()> {
         let bits = stack.pop_smallint_range(0, 127)? as u16 * 8;
-        let mut cs_raw = stack.pop_slice()?;
-        let mut cs = cs_raw.apply()?;
+        let mut cs_raw = stack.pop_cell_slice()?;
+        let mut cs = cs_raw.apply();
 
         let mut buffer = [0; 128];
         let bytes = cs.load_raw(&mut buffer, bits);
@@ -324,7 +298,7 @@ impl CellUtils {
 
                 if advance {
                     let range = cs.range();
-                    Rc::make_mut(&mut cs_raw).set_range(range);
+                    SafeRc::make_mut(&mut cs_raw).set_range(range);
                 }
             }
             Err(e) if !quiet => return Err(e.into()),
@@ -332,7 +306,7 @@ impl CellUtils {
         }
 
         if advance {
-            stack.push_raw(cs_raw)?;
+            stack.push_raw(cs_raw.into_dyn_fift_value())?;
         }
 
         if quiet {
@@ -346,8 +320,8 @@ impl CellUtils {
     #[cmd(name = "ref@?", stack, args(advance = false, quiet = true))]
     #[cmd(name = "ref@?+", stack, args(advance = true, quiet = true))]
     fn interpret_load_ref(stack: &mut Stack, advance: bool, quiet: bool) -> Result<()> {
-        let mut cs_raw = stack.pop_slice()?;
-        let mut cs = cs_raw.apply()?;
+        let mut cs_raw = stack.pop_cell_slice()?;
+        let mut cs = cs_raw.apply();
 
         let cell = cs.load_reference_cloned();
         let is_ok = cell.is_ok();
@@ -355,9 +329,9 @@ impl CellUtils {
         if advance {
             if is_ok {
                 let range = cs.range();
-                Rc::make_mut(&mut cs_raw).set_range(range);
+                SafeRc::make_mut(&mut cs_raw).set_range(range);
             }
-            stack.push_raw(cs_raw)?;
+            stack.push_raw(cs_raw.into_dyn_fift_value())?;
         }
 
         match cell {
@@ -374,7 +348,7 @@ impl CellUtils {
 
     #[cmd(name = "empty?", stack)]
     fn interpret_cell_empty(stack: &mut Stack) -> Result<()> {
-        let cs = stack.pop_slice()?;
+        let cs = stack.pop_cell_slice()?;
         stack.push_bool(cs.range().is_data_empty() && cs.range().is_refs_empty())
     }
 
@@ -383,7 +357,7 @@ impl CellUtils {
     #[cmd(name = "sbitrefs", stack, args(bits = true, refs = true))]
     #[cmd(name = "remaining", stack, args(bits = true, refs = true))]
     fn interpret_slice_bitrefs(stack: &mut Stack, bits: bool, refs: bool) -> Result<()> {
-        let cs = stack.pop_slice()?;
+        let cs = stack.pop_cell_slice()?;
         if bits {
             stack.push_int(cs.range().size_bits())?;
         }
@@ -395,7 +369,7 @@ impl CellUtils {
 
     #[cmd(name = "s>", stack)]
     fn interpret_cell_check_empty(stack: &mut Stack) -> Result<()> {
-        let cs = stack.pop_slice()?;
+        let cs = stack.pop_cell_slice()?;
         anyhow::ensure!(
             cs.range().is_data_empty() && cs.range().is_refs_empty(),
             "Expected empty cell slice"
@@ -408,8 +382,8 @@ impl CellUtils {
     fn interpret_cell_datasize(stack: &mut Stack, load_slice: bool) -> Result<()> {
         const LIMIT: usize = 1 << 22;
         let (cells, bits, refs) = if load_slice {
-            let slice = stack.pop_slice()?;
-            let cs = slice.apply()?;
+            let slice = stack.pop_cell_slice()?;
+            let cs = slice.apply();
             StorageStat::compute_for_slice(&cs, LIMIT)
         } else {
             let cell = stack.pop_cell()?;
@@ -442,7 +416,7 @@ impl CellUtils {
     #[cmd(name = "boc+>B", stack, args(ext = true, base64 = false))]
     #[cmd(name = "boc+>base64", stack, args(ext = true, base64 = true))]
     fn interpret_boc_serialize_ext(stack: &mut Stack, ext: bool, base64: bool) -> Result<()> {
-        use everscale_types::boc::ser::BocHeader;
+        use tycho_types::boc::ser::BocHeader;
 
         const MODE_WITH_CRC: u32 = 0b00010;
         const SUPPORTED_MODES: u32 = MODE_WITH_CRC;
@@ -478,7 +452,7 @@ impl CellUtils {
     fn interpret_bitstring_hex_literal(ctx: &mut Context) -> Result<()> {
         let s = ctx.input.scan_until_delimiter('}')?;
         let cell = decode_hex_bitstring(s)?.build()?;
-        ctx.stack.push(OwnedCellSlice::new(cell))?;
+        ctx.stack.push(OwnedCellSlice::new_allow_exotic(cell))?;
         ctx.stack.push_argcount(1)
     }
 
@@ -486,7 +460,7 @@ impl CellUtils {
     fn interpret_bitstring_binary_literal(ctx: &mut Context) -> Result<()> {
         let s = ctx.input.scan_until_delimiter('}')?;
         let cell = decode_binary_bitstring(s)?.build()?;
-        ctx.stack.push(OwnedCellSlice::new(cell))?;
+        ctx.stack.push(OwnedCellSlice::new_allow_exotic(cell))?;
         ctx.stack.push_argcount(1)
     }
 }
@@ -569,7 +543,7 @@ impl<'a> StorageStat<'a> {
 fn len_as_bits<T: AsRef<[u8]>>(name: &str, data: T) -> Result<u16> {
     let bits = data.as_ref().len() * 8;
     anyhow::ensure!(
-        bits <= everscale_types::cell::MAX_BIT_LEN as usize,
+        bits <= tycho_types::cell::MAX_BIT_LEN as usize,
         "{name} does not fit into cell"
     );
     Ok(bits as u16)

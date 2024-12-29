@@ -49,8 +49,8 @@ impl DebugUtils {
             DEFAULT_RECURSIVE_PRINT_LIMIT
         };
 
-        let cs = ctx.stack.pop_slice()?;
-        write!(ctx.stdout, "{}", cs.apply()?.display_slice_tree(limit))?;
+        let cs = ctx.stack.pop_cell_slice()?;
+        write!(ctx.stdout, "{}", cs.apply().display_slice_tree(limit))?;
         Ok(())
     }
 

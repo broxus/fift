@@ -2,11 +2,12 @@ use std::rc::Rc;
 use std::str::FromStr;
 
 use anyhow::Result;
-use everscale_types::models::StdAddr;
-use everscale_types::prelude::HashBytes;
 use num_bigint::{BigInt, Sign};
 use num_traits::Num;
 use sha2::Digest;
+use tycho_types::models::StdAddr;
+use tycho_types::prelude::*;
+use tycho_vm::SafeRc;
 
 use crate::core::*;
 use crate::error::UnexpectedEof;
@@ -73,8 +74,8 @@ impl StringUtils {
     fn interpret_hold(stack: &mut Stack) -> Result<()> {
         let c = stack.pop_smallint_char()?;
         let mut string = stack.pop_string()?;
-        Rc::make_mut(&mut string).push(c);
-        stack.push_raw(string)
+        SafeRc::make_mut(&mut string).push(c);
+        stack.push_raw(string.into_dyn_fift_value())
     }
 
     #[cmd(name = "(number)", stack)]
@@ -121,18 +122,18 @@ impl StringUtils {
         anyhow::ensure!(head.is_char_boundary(at), "Index is not the char boundary");
 
         let tail = Rc::new(head[at..].to_owned());
-        Rc::make_mut(&mut head).truncate(at);
+        SafeRc::make_mut(&mut head).truncate(at);
 
-        stack.push_raw(head)?;
-        stack.push_raw(tail)
+        stack.push_raw(head.into_dyn_fift_value())?;
+        stack.push_raw(tail.into_dyn_fift_value())
     }
 
     #[cmd(name = "$+", stack)]
     fn interpret_str_concat(stack: &mut Stack) -> Result<()> {
         let tail = stack.pop_string()?;
         let mut head = stack.pop_string()?;
-        Rc::make_mut(&mut head).push_str(&tail);
-        stack.push_raw(head)
+        SafeRc::make_mut(&mut head).push_str(&tail);
+        stack.push_raw(head.into_dyn_fift_value())
     }
 
     #[cmd(name = "$=", stack)]
@@ -152,8 +153,8 @@ impl StringUtils {
     #[cmd(name = "$reverse", stack)]
     fn interpret_str_reverse(stack: &mut Stack) -> Result<()> {
         let mut string = stack.pop_string()?;
-        reverse_utf8_string_inplace(Rc::make_mut(&mut string).as_mut_str());
-        stack.push_raw(string)
+        reverse_utf8_string_inplace(SafeRc::make_mut(&mut string).as_mut_str());
+        stack.push_raw(string.into_dyn_fift_value())
     }
 
     #[cmd(name = "$pos", stack)]
@@ -194,7 +195,7 @@ impl StringUtils {
         let string = stack.pop_string()?;
         let symbols = string
             .chars()
-            .map(|c| Rc::new(c.to_string()) as Rc<dyn StackValue>)
+            .map(|c| SafeRc::new_dyn_fift_value(c.to_string()))
             .collect::<Vec<_>>();
 
         stack.push(symbols)
@@ -226,7 +227,7 @@ impl StringUtils {
         let substrings = string
             .split(sep.as_str())
             .filter(|s| !s.is_empty())
-            .map(|s| Rc::new(s.to_string()) as Rc<dyn StackValue>)
+            .map(|s| SafeRc::new_dyn_fift_value(s.to_string()))
             .collect::<Vec<_>>();
 
         stack.push(substrings)
@@ -263,10 +264,10 @@ impl StringUtils {
         };
         let mut string = stack.pop_string()?;
         {
-            let string = Rc::make_mut(&mut string);
+            let string = SafeRc::make_mut(&mut string);
             string.truncate(string.trim_end_matches(arg).len());
         }
-        stack.push_raw(string)
+        stack.push_raw(string.into_dyn_fift_value())
     }
 
     #[cmd(name = "$len", stack)]
@@ -328,10 +329,10 @@ impl StringUtils {
         let at = stack.pop_smallint_range(0, i32::MAX as _)? as usize;
         let mut head = stack.pop_bytes()?;
         anyhow::ensure!(at <= head.len(), "Index out of range");
-        let tail = Rc::new(head[at..].to_owned());
-        Rc::make_mut(&mut head).truncate(at);
+        let tail = SafeRc::new_dyn_fift_value(head[at..].to_owned());
+        SafeRc::make_mut(&mut head).truncate(at);
 
-        stack.push_raw(head)?;
+        stack.push_raw(head.into_dyn_fift_value())?;
         stack.push_raw(tail)
     }
 
@@ -339,8 +340,8 @@ impl StringUtils {
     fn interpret_bytes_concat(stack: &mut Stack) -> Result<()> {
         let tail = stack.pop_bytes()?;
         let mut head = stack.pop_bytes()?;
-        Rc::make_mut(&mut head).extend_from_slice(&tail);
-        stack.push_raw(head)
+        SafeRc::make_mut(&mut head).extend_from_slice(&tail);
+        stack.push_raw(head.into_dyn_fift_value())
     }
 
     #[cmd(name = "B=", stack)]
@@ -366,7 +367,7 @@ impl StringUtils {
         let int = stack.pop_int()?;
         anyhow::ensure!(bits % 8 == 0, "Can store only an integer number of bytes");
         anyhow::ensure!(
-            bitsize(&int, sgn) <= bits as _,
+            int.bitsize(sgn) <= bits as _,
             "Integer does not fit into the buffer"
         );
 
@@ -417,11 +418,11 @@ impl StringUtils {
         };
 
         if adv {
-            match Rc::get_mut(&mut bytes) {
+            match SafeRc::get_mut(&mut bytes) {
                 Some(inner) => {
                     inner.copy_within(byte_len.., 0);
                     inner.truncate(inner.len() - byte_len);
-                    stack.push_raw(bytes)?;
+                    stack.push_raw(bytes.into_dyn_fift_value())?;
                 }
                 None => stack.push(bytes.as_ref()[byte_len..].to_owned())?,
             }

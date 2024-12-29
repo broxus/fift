@@ -1,18 +1,17 @@
 use std::io::Write;
 use std::num::NonZeroU32;
-use std::rc::Rc;
 
 use anyhow::{Context as _, Result};
-
 pub use fift_proc::fift_module;
+use tycho_vm::SafeRc;
 
-pub use self::cont::{Cont, ContImpl};
+pub use self::cont::{Cont, ContImpl, DynFiftCont, IntoDynFiftCont};
 pub use self::dictionary::{Dictionaries, Dictionary, DictionaryEntry};
 pub use self::env::{Environment, SourceBlock};
 pub use self::lexer::Lexer;
 pub use self::stack::{
-    HashMapTreeKey, HashMapTreeNode, OwnedCellSlice, SharedBox, Stack, StackTuple, StackValue,
-    StackValueType, WordList,
+    Atom, DynFiftValue, HashMapTreeKey, HashMapTreeNode, IntoDynFiftValue, OwnedCellSlice,
+    SharedBox, Stack, StackTuple, StackValue, StackValueType, WordList,
 };
 
 pub mod cont;
@@ -84,10 +83,10 @@ impl<'a> Context<'a> {
 
     pub fn run(&mut self) -> Result<u8> {
         self.stats = Default::default();
-        let mut current = Some(Rc::new(cont::InterpreterCont) as Cont);
+        let mut current = Some(Cont::new_dyn_fift_cont(cont::InterpreterCont));
         while let Some(cont) = current.take() {
             self.stats.inc_step(&self.limits)?;
-            current = cont.run(self)?;
+            current = SafeRc::into_inner(cont).run(self)?;
             if current.is_none() {
                 current = self.next.take();
             }
@@ -109,28 +108,28 @@ impl<'a> Context<'a> {
 
         let cont = match count {
             0 => None,
-            1 => Some(Rc::new(cont::LitCont(self.stack.pop()?)) as Cont),
+            1 => Some(Cont::new_dyn_fift_cont(cont::LitCont(self.stack.pop()?))),
             _ => {
                 let mut literals = Vec::with_capacity(count);
                 for _ in 0..count {
                     literals.push(self.stack.pop()?);
                 }
                 literals.reverse();
-                Some(Rc::new(cont::MultiLitCont(literals)) as Cont)
+                Some(Cont::new_dyn_fift_cont(cont::MultiLitCont(literals)))
             }
         };
 
         let mut word_list = self.stack.pop_word_list()?;
         {
-            let word_list = Rc::make_mut(&mut word_list);
+            let word_list = SafeRc::make_mut(&mut word_list);
             word_list.items.extend(cont);
 
             if !cont::NopCont::is_nop(&**word_def) {
-                word_list.items.push(Rc::clone(&word_def));
+                word_list.items.push(SafeRc::clone(&word_def));
             }
         }
 
-        self.stack.push_raw(word_list)
+        self.stack.push_raw(word_list.into_dyn_fift_value())
     }
 }
 

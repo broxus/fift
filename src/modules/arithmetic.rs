@@ -1,12 +1,11 @@
-use std::rc::Rc;
-
 use anyhow::Result;
 use num_bigint::{BigInt, Sign};
 use num_integer::Integer;
 use num_traits::{One, Signed, Zero};
+use tycho_types::prelude::*;
+use tycho_vm::SafeRc;
 
 use crate::core::*;
-use crate::util::bitsize;
 
 pub struct Arithmetic;
 
@@ -14,8 +13,9 @@ pub struct Arithmetic;
 impl Arithmetic {
     #[init]
     fn init(&self, d: &mut Dictionary) -> Result<()> {
-        let mut make_int_lit =
-            |name: &str, value: i32| d.define_word(name, Rc::new(cont::IntLitCont::from(value)));
+        let mut make_int_lit = |name: &str, value: i32| {
+            d.define_word(name, SafeRc::new(cont::IntLitCont::from(value)))
+        };
 
         make_int_lit("false ", 0)?;
         make_int_lit("true ", -1)?;
@@ -32,16 +32,16 @@ impl Arithmetic {
     fn interpret_plus(stack: &mut Stack) -> Result<()> {
         let y = stack.pop_int()?;
         let mut x = stack.pop_int()?;
-        *Rc::make_mut(&mut x) += y.as_ref();
-        stack.push_raw(x)
+        *SafeRc::make_mut(&mut x) += y.as_ref();
+        stack.push_raw(x.into_dyn_fift_value())
     }
 
     #[cmd(name = "-", stack)]
     fn interpret_minus(stack: &mut Stack) -> Result<()> {
         let y = stack.pop_int()?;
         let mut x = stack.pop_int()?;
-        *Rc::make_mut(&mut x) -= y.as_ref();
-        stack.push_raw(x)
+        *SafeRc::make_mut(&mut x) -= y.as_ref();
+        stack.push_raw(x.into_dyn_fift_value())
     }
 
     #[cmd(name = "1+", stack, args(rhs = 1))]
@@ -50,26 +50,26 @@ impl Arithmetic {
     #[cmd(name = "2-", stack, args(rhs = -2))]
     fn interpret_plus_const(stack: &mut Stack, rhs: i32) -> Result<()> {
         let mut x = stack.pop_int()?;
-        *Rc::make_mut(&mut x) += rhs;
-        stack.push_raw(x)
+        *SafeRc::make_mut(&mut x) += rhs;
+        stack.push_raw(x.into_dyn_fift_value())
     }
 
     #[cmd(name = "negate", stack)]
     fn interpret_negate(stack: &mut Stack) -> Result<()> {
         let mut x = stack.pop_int()?;
         {
-            let x = Rc::make_mut(&mut x);
+            let x = SafeRc::make_mut(&mut x);
             *x = -std::mem::take(x);
         }
-        stack.push_raw(x)
+        stack.push_raw(x.into_dyn_fift_value())
     }
 
     #[cmd(name = "*", stack)]
     fn interpret_mul(stack: &mut Stack) -> Result<()> {
         let y = stack.pop_int()?;
         let mut x = stack.pop_int()?;
-        *Rc::make_mut(&mut x) *= y.as_ref();
-        stack.push_raw(x)
+        *SafeRc::make_mut(&mut x) *= y.as_ref();
+        stack.push_raw(x.into_dyn_fift_value())
     }
 
     #[cmd(name = "/", stack, args(r = Rounding::Floor))]
@@ -108,7 +108,7 @@ impl Arithmetic {
         let z = stack.pop_int()?;
         let y = stack.pop_int()?;
         let mut x = stack.pop_int()?;
-        *Rc::make_mut(&mut x) *= y.as_ref();
+        *SafeRc::make_mut(&mut x) *= y.as_ref();
         stack.push(divmod(&x, &z, r)?.0)
     }
 
@@ -119,7 +119,7 @@ impl Arithmetic {
         let z = stack.pop_int()?;
         let y = stack.pop_int()?;
         let mut x = stack.pop_int()?;
-        *Rc::make_mut(&mut x) *= y.as_ref();
+        *SafeRc::make_mut(&mut x) *= y.as_ref();
         let (q, r) = divmod(&x, &z, r)?;
         stack.push(q)?;
         stack.push(r)
@@ -130,7 +130,7 @@ impl Arithmetic {
         let z = stack.pop_int()?;
         let y = stack.pop_int()?;
         let mut x = stack.pop_int()?;
-        *Rc::make_mut(&mut x) *= y.as_ref();
+        *SafeRc::make_mut(&mut x) *= y.as_ref();
         stack.push(divmod(&x, &z, r)?.1)
     }
 
@@ -157,16 +157,16 @@ impl Arithmetic {
         let mut mask = BigInt::one();
         mask <<= y;
         mask -= 1;
-        *Rc::make_mut(&mut x) &= mask;
-        stack.push_raw(x)
+        *SafeRc::make_mut(&mut x) &= mask;
+        stack.push_raw(x.into_dyn_fift_value())
     }
 
     #[cmd(name = "<<", stack)]
     fn interpret_lshift(stack: &mut Stack) -> Result<()> {
         let y = stack.pop_smallint_range(0, 256)? as u16;
         let mut x = stack.pop_int()?;
-        *Rc::make_mut(&mut x) <<= y;
-        stack.push_raw(x)
+        *SafeRc::make_mut(&mut x) <<= y;
+        stack.push_raw(x.into_dyn_fift_value())
     }
 
     #[cmd(name = ">>", stack, args(r = Rounding::Floor))]
@@ -176,25 +176,25 @@ impl Arithmetic {
         let y = stack.pop_smallint_range(0, 256)? as u16;
         let mut x = stack.pop_int()?;
         match r {
-            Rounding::Floor => *Rc::make_mut(&mut x) >>= y,
+            Rounding::Floor => *SafeRc::make_mut(&mut x) >>= y,
             // TODO
             _ => anyhow::bail!("Unimplemented"),
         }
-        stack.push_raw(x)
+        stack.push_raw(x.into_dyn_fift_value())
     }
 
     #[cmd(name = "2*", stack, args(y = 1))]
     fn interpret_lshift_const(stack: &mut Stack, y: u8) -> Result<()> {
         let mut x = stack.pop_int()?;
-        *Rc::make_mut(&mut x) <<= y;
-        stack.push_raw(x)
+        *SafeRc::make_mut(&mut x) <<= y;
+        stack.push_raw(x.into_dyn_fift_value())
     }
 
     #[cmd(name = "2/", stack, args(y = 1))]
     fn interpret_rshift_const(stack: &mut Stack, y: u8) -> Result<()> {
         let mut x = stack.pop_int()?;
-        *Rc::make_mut(&mut x) >>= y;
-        stack.push_raw(x)
+        *SafeRc::make_mut(&mut x) >>= y;
+        stack.push_raw(x.into_dyn_fift_value())
     }
 
     #[cmd(name = "<</", stack, args(r = Rounding::Floor))]
@@ -204,7 +204,7 @@ impl Arithmetic {
         let z = stack.pop_smallint_range(0, 256)?;
         let y = stack.pop_int()?;
         let mut x = stack.pop_int()?;
-        *Rc::make_mut(&mut x) <<= z;
+        *SafeRc::make_mut(&mut x) <<= z;
         stack.push(divmod(&x, &y, r)?.0)
     }
 
@@ -216,34 +216,34 @@ impl Arithmetic {
     fn interpret_not(stack: &mut Stack) -> Result<()> {
         let mut x = stack.pop_int()?;
         {
-            let lhs = Rc::make_mut(&mut x);
+            let lhs = SafeRc::make_mut(&mut x);
             *lhs = !std::mem::take(lhs);
         }
-        stack.push_raw(x)
+        stack.push_raw(x.into_dyn_fift_value())
     }
 
     #[cmd(name = "and", stack)]
     fn interpret_and(stack: &mut Stack) -> Result<()> {
         let y = stack.pop_int()?;
         let mut x = stack.pop_int()?;
-        *Rc::make_mut(&mut x) &= y.as_ref();
-        stack.push_raw(x)
+        *SafeRc::make_mut(&mut x) &= y.as_ref();
+        stack.push_raw(x.into_dyn_fift_value())
     }
 
     #[cmd(name = "or", stack)]
     fn interpret_or(stack: &mut Stack) -> Result<()> {
         let y = stack.pop_int()?;
         let mut x = stack.pop_int()?;
-        *Rc::make_mut(&mut x) |= y.as_ref();
-        stack.push_raw(x)
+        *SafeRc::make_mut(&mut x) |= y.as_ref();
+        stack.push_raw(x.into_dyn_fift_value())
     }
 
     #[cmd(name = "xor", stack)]
     fn interpret_xor(stack: &mut Stack) -> Result<()> {
         let y = stack.pop_int()?;
         let mut x = stack.pop_int()?;
-        *Rc::make_mut(&mut x) ^= y.as_ref();
-        stack.push_raw(x)
+        *SafeRc::make_mut(&mut x) ^= y.as_ref();
+        stack.push_raw(x.into_dyn_fift_value())
     }
 
     // === Integer comparison ===
@@ -284,7 +284,7 @@ impl Arithmetic {
     fn interpret_fits(stack: &mut Stack, signed: bool) -> Result<()> {
         let y = stack.pop_smallint_range(0, 1023)? as u16;
         let x = stack.pop_int()?;
-        let bits = bitsize(&x, signed);
+        let bits = x.bitsize(signed);
         stack.push_bool(bits <= y)
     }
 }

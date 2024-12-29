@@ -3,13 +3,46 @@ use std::rc::Rc;
 
 use anyhow::Result;
 use num_bigint::BigInt;
+use tycho_vm::{SafeDelete, SafeRc};
 
 use super::{Context, Dictionary, Stack, StackValue, StackValueType, WordList};
+use crate::core::DynFiftValue;
 use crate::util::*;
 
-pub type Cont = Rc<dyn ContImpl>;
+pub trait DynFiftCont {
+    fn new_dyn_fift_cont<T: ContImpl + 'static>(cont: T) -> Cont;
+}
 
-pub trait ContImpl {
+impl DynFiftCont for Cont {
+    #[inline]
+    fn new_dyn_fift_cont<T: ContImpl + 'static>(cont: T) -> Cont {
+        let cont: Rc<dyn ContImpl> = Rc::new(cont);
+        Cont::from(cont)
+    }
+}
+
+pub trait IntoDynFiftCont {
+    fn into_dyn_fift_cont(self) -> Cont;
+}
+
+impl<T: ContImpl> IntoDynFiftCont for Rc<T> {
+    #[inline]
+    fn into_dyn_fift_cont(self) -> Cont {
+        let this: Rc<dyn ContImpl> = self;
+        Cont::from(this)
+    }
+}
+
+impl<T: ContImpl> IntoDynFiftCont for SafeRc<T> {
+    #[inline]
+    fn into_dyn_fift_cont(self) -> Cont {
+        Rc::<T>::into_dyn_fift_cont(SafeRc::into_inner(self))
+    }
+}
+
+pub type Cont = SafeRc<dyn ContImpl>;
+
+pub trait ContImpl: SafeDelete {
     fn run(self: Rc<Self>, ctx: &mut Context) -> Result<Option<Cont>>;
 
     fn up(&self) -> Option<&Cont> {
@@ -85,9 +118,11 @@ pub struct InterpreterCont;
 impl ContImpl for InterpreterCont {
     fn run(self: Rc<Self>, ctx: &mut Context) -> Result<Option<Cont>> {
         thread_local! {
-            static COMPILE_EXECUTE: Cont = Rc::new(CompileExecuteCont);
+            static COMPILE_EXECUTE: Cont = SafeRc::new_dyn_fift_cont(CompileExecuteCont);
             static WORD: RefCell<String> = RefCell::new(String::with_capacity(128));
         };
+
+        let this = self.into_dyn_fift_cont();
 
         ctx.stdout.flush()?;
 
@@ -154,7 +189,7 @@ impl ContImpl for InterpreterCont {
                 if entry.active {
                     ctx.next = SeqCont::make(
                         Some(compile_exec),
-                        SeqCont::make(Some(self), ctx.next.take()),
+                        SeqCont::make(Some(this), ctx.next.take()),
                     );
                     return Ok(Some(entry.definition.clone()));
                 } else {
@@ -164,11 +199,11 @@ impl ContImpl for InterpreterCont {
             };
 
             ctx.exit_interpret.store(match &ctx.next {
-                Some(next) => Rc::new(next.clone()),
+                Some(next) => SafeRc::new_dyn_fift_value(next.clone()),
                 None => NopCont::value_instance(),
             });
 
-            ctx.next = SeqCont::make(Some(self), ctx.next.take());
+            ctx.next = SeqCont::make(Some(this), ctx.next.take());
             break Ok(Some(compile_exec));
         }
     }
@@ -215,12 +250,12 @@ impl ContImpl for ListCont {
                 ctx.next = if is_last {
                     this.after.take()
                 } else {
-                    Some(self)
+                    Some(self.into_dyn_fift_cont())
                 };
             }
             None => {
                 if let Some(next) = ctx.next.take() {
-                    ctx.next = Some(Rc::new(ListCont {
+                    ctx.next = Some(Cont::new_dyn_fift_cont(ListCont {
                         after: SeqCont::make(self.after.clone(), Some(next)),
                         list: self.list.clone(),
                         pos: self.pos + 1,
@@ -228,7 +263,7 @@ impl ContImpl for ListCont {
                 } else if is_last {
                     ctx.next = self.after.clone()
                 } else {
-                    ctx.next = Some(Rc::new(ListCont {
+                    ctx.next = Some(Cont::new_dyn_fift_cont(ListCont {
                         after: self.after.clone(),
                         list: self.list.clone(),
                         pos: self.pos + 1,
@@ -263,7 +298,7 @@ impl ContImpl for ListCont {
             }
 
             let len = self.list.items.len();
-            let start = if self.pos >= N { self.pos - N } else { 0 };
+            let start = self.pos.saturating_sub(N);
             let items = self.list.items.iter();
 
             if start > 0 {
@@ -287,9 +322,9 @@ pub struct NopCont;
 
 impl NopCont {
     thread_local! {
-        static INSTANCE: (Cont, Rc<dyn StackValue>) = {
-            let cont = Rc::new(NopCont);
-            let value: Rc<dyn StackValue> = Rc::new(cont.clone() as Rc<dyn ContImpl>);
+        static INSTANCE: (Cont, SafeRc<dyn StackValue>) = {
+            let cont = Cont::new_dyn_fift_cont(NopCont);
+            let value: SafeRc<dyn StackValue> = SafeRc::new_dyn_fift_value(cont.clone());
             (cont, value)
         };
     }
@@ -298,12 +333,12 @@ impl NopCont {
         Self::INSTANCE.with(|(c, _)| c.clone())
     }
 
-    pub fn value_instance() -> Rc<dyn StackValue> {
+    pub fn value_instance() -> SafeRc<dyn StackValue> {
         Self::INSTANCE.with(|(_, v)| v.clone())
     }
 
     pub fn is_nop(cont: &dyn ContImpl) -> bool {
-        let left = Self::INSTANCE.with(|(c, _)| Rc::as_ptr(c) as *const ());
+        let left = Self::INSTANCE.with(|(c, _)| SafeRc::as_ptr(c) as *const ());
         let right = cont as *const _ as *const ();
         std::ptr::eq(left, right)
     }
@@ -329,7 +364,7 @@ impl SeqCont {
         if second.is_none() {
             first
         } else if let Some(first) = first {
-            Some(Rc::new(Self {
+            Some(Cont::new_dyn_fift_cont(Self {
                 first: Some(first),
                 second,
             }))
@@ -349,7 +384,7 @@ impl ContImpl for SeqCont {
                 } else {
                     let result = std::mem::replace(&mut this.first, this.second.take());
                     this.second = ctx.next.take();
-                    ctx.next = Some(self);
+                    ctx.next = Some(self.into_dyn_fift_cont());
                     result
                 }
             }
@@ -395,7 +430,7 @@ impl ContImpl for TimesCont {
                 if this.count > 1 {
                     this.count -= 1;
                     let body = this.body.clone();
-                    ctx.next = Some(self);
+                    ctx.next = Some(self.into_dyn_fift_cont());
                     body
                 } else {
                     ctx.next = this.after.take();
@@ -406,7 +441,7 @@ impl ContImpl for TimesCont {
                 let next = SeqCont::make(self.after.clone(), ctx.next.take());
 
                 ctx.next = if self.count > 1 {
-                    Some(Rc::new(Self {
+                    Some(Cont::new_dyn_fift_cont(Self {
                         body: self.body.clone(),
                         after: next,
                         count: self.count - 1,
@@ -468,7 +503,7 @@ impl ContImpl for UntilCont {
                 }
             }
         };
-        ctx.next = Some(next);
+        ctx.next = Some(next.into_dyn_fift_cont());
         Ok(body)
     }
 
@@ -535,7 +570,7 @@ impl ContImpl for WhileCont {
             }),
         };
 
-        ctx.next = Some(next);
+        ctx.next = Some(next.into_dyn_fift_cont());
         Ok(cont)
     }
 
@@ -582,7 +617,7 @@ impl<T> LoopCont<T> {
 impl<T: LoopContImpl + 'static> ContImpl for LoopCont<T> {
     fn run(mut self: Rc<Self>, ctx: &mut Context) -> Result<Option<Cont>> {
         let Some(this) = Rc::get_mut(&mut self) else {
-            return Ok(Some(Rc::new(Self {
+            return Ok(Some(SafeRc::new_dyn_fift_cont(Self {
                 inner: self.inner.clone(),
                 state: self.state,
                 func: self.func.clone(),
@@ -606,7 +641,7 @@ impl<T: LoopContImpl + 'static> ContImpl for LoopCont<T> {
                     }
                     this.state = LoopContState::PostExec;
                     let res = self.func.clone();
-                    ctx.next = Some(self);
+                    ctx.next = Some(self.into_dyn_fift_cont());
                     break Some(res);
                 }
                 LoopContState::PostExec => {
@@ -615,7 +650,7 @@ impl<T: LoopContImpl + 'static> ContImpl for LoopCont<T> {
                         continue;
                     }
                     this.state = LoopContState::PreExec;
-                    break Some(self);
+                    break Some(self.into_dyn_fift_cont());
                 }
                 LoopContState::Finalize => {
                     break if this.inner.finalize(ctx)? {
@@ -686,7 +721,7 @@ impl ContImpl for IntLitCont {
     }
 }
 
-pub struct LitCont(pub Rc<dyn StackValue>);
+pub struct LitCont(pub SafeRc<dyn StackValue>);
 
 impl ContImpl for LitCont {
     fn run(self: Rc<Self>, ctx: &mut Context) -> Result<Option<Cont>> {
@@ -703,7 +738,7 @@ impl ContImpl for LitCont {
     }
 }
 
-pub struct MultiLitCont(pub Vec<Rc<dyn StackValue>>);
+pub struct MultiLitCont(pub Vec<SafeRc<dyn StackValue>>);
 
 impl ContImpl for MultiLitCont {
     fn run(self: Rc<Self>, ctx: &mut Context) -> Result<Option<Cont>> {
@@ -778,7 +813,7 @@ impl Context<'_> {
     fn insert_before_next(&mut self, cont: &mut Option<Cont>) {
         if let Some(next) = self.next.take() {
             *cont = match cont.take() {
-                Some(prev) => Some(Rc::new(SeqCont {
+                Some(prev) => Some(Cont::new_dyn_fift_cont(SeqCont {
                     first: Some(prev),
                     second: Some(next),
                 })),

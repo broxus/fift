@@ -1,9 +1,9 @@
 use anyhow::Result;
 use crc::Crc;
-use everscale_types::cell::MAX_BIT_LEN;
-use everscale_types::prelude::*;
-use num_bigint::{BigInt, Sign};
-use num_traits::{Num, ToPrimitive};
+use num_bigint::BigInt;
+use num_traits::Num;
+use tycho_types::cell::MAX_BIT_LEN;
+use tycho_types::prelude::*;
 use unicode_segmentation::UnicodeSegmentation;
 
 pub const CRC_16: Crc<u16> = Crc::<u16>::new(&crc::CRC_16_XMODEM);
@@ -158,7 +158,7 @@ impl std::fmt::Display for DisplayCellSlice<'_, '_> {
             writeln!(f, "{:indent$}{}", "", DisplaySliceData(&cs))?;
 
             for cell in cs.references().rev() {
-                let cs = cell.as_slice_allow_pruned();
+                let cs = cell.as_slice_allow_exotic();
                 stack.push((indent + 1, cs));
             }
         }
@@ -184,7 +184,7 @@ impl std::fmt::Display for DisplaySliceData<'_, '_> {
             .map_err(|_| std::fmt::Error)?;
         append_tag(&mut buffer, bits);
 
-        let mut result = hex::encode(&buffer[..(bits as usize + 7) / 8]);
+        let mut result = hex::encode(&buffer[..(bits as usize).div_ceil(8)]);
         if (1..=4).contains(&(bits % 8)) {
             result.pop();
         }
@@ -230,11 +230,11 @@ pub fn decode_hex_bitstring(s: &str) -> Result<CellBuilder> {
     };
 
     let mut half_byte = None;
-    if s.len() % 2 != 0 {
-        if let Some((last, prefix)) = s.split_last() {
-            half_byte = Some(hex_char(*last)?);
-            s = prefix;
-        }
+    if s.len() % 2 != 0
+        && let Some((last, prefix)) = s.split_last()
+    {
+        half_byte = Some(hex_char(*last)?);
+        s = prefix;
     }
 
     anyhow::ensure!(s.len() <= 128 * 2, "Bitstring is too long");
@@ -284,75 +284,4 @@ pub fn decode_binary_bitstring(s: &str) -> Result<CellBuilder> {
     let mut builder = CellBuilder::new();
     builder.store_raw(&buffer, bits as u16)?;
     Ok(builder)
-}
-
-pub fn bitsize(int: &BigInt, signed: bool) -> u16 {
-    let mut bits = int.bits() as u16;
-    if signed {
-        match int.sign() {
-            Sign::NoSign => bits,
-            Sign::Plus => bits + 1,
-            Sign::Minus => {
-                // Check if `int` magnitude is not a power of 2
-                let mut digits = int.iter_u64_digits().rev();
-                if let Some(hi) = digits.next() {
-                    if !hi.is_power_of_two() || !digits.all(|digit| digit == 0) {
-                        bits += 1;
-                    }
-                }
-                bits
-            }
-        }
-    } else {
-        bits
-    }
-}
-
-pub fn store_int_to_builder(
-    builder: &mut CellBuilder,
-    int: &BigInt,
-    bits: u16,
-    signed: bool,
-) -> Result<()> {
-    use std::borrow::Cow;
-
-    let int_bits = bitsize(int, signed);
-    anyhow::ensure!(
-        int_bits <= bits,
-        "Integer does not fit into cell: {} bits out of {bits}",
-        int_bits
-    );
-
-    match int.to_u64() {
-        Some(value) => builder.store_uint(value, bits)?,
-        None => {
-            let int = if bits % 8 != 0 {
-                let align = 8 - bits % 8;
-                Cow::Owned(int.clone() << align)
-            } else {
-                Cow::Borrowed(int)
-            };
-
-            let minimal_bytes = ((bits + 7) / 8) as usize;
-
-            let (prefix, mut bytes) = if signed {
-                let bytes = int.to_signed_bytes_le();
-                (
-                    bytes
-                        .last()
-                        .map(|first| (first >> 7) * 255)
-                        .unwrap_or_default(),
-                    bytes,
-                )
-            } else {
-                (0, int.to_bytes_le().1)
-            };
-            bytes.resize(minimal_bytes, prefix);
-            bytes.reverse();
-
-            builder.store_raw(&bytes, bits)?;
-        }
-    };
-
-    Ok(())
 }

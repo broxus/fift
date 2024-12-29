@@ -105,7 +105,7 @@ impl std::io::BufRead for LineReader {
                 }
             }
         }
-        Ok(self.line[self.offset..].as_bytes())
+        Ok(&self.line.as_bytes()[self.offset..])
     }
 
     fn consume(&mut self, amt: usize) {

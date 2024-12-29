@@ -3,8 +3,8 @@ name = "fift"
 description = "Rust implementation of the Fift esoteric language"
 repository = "https://github.com/broxus/fift"
 version = "0.1.23"
-edition = "2021"
-rust-version = "1.70"
+edition = "2024"
+rust-version = "1.88"
 include = ["src/**/*.rs", "src/**/*.fif", "LICENSE-*", "README.md"]
 license = "MIT OR Apache-2.0"
 
@@ -20,23 +20,21 @@ anyhow = "1.0"
 base64 = "0.22"
 crc = "3.0"
 dyn-clone = "1.0"
-everscale-crypto = "0.2"
+tycho-crypto = { version = "0.4.0", features = ["rand9"] }
 hex = "0.4"
 num-bigint = "0.4"
 num-integer = "0.1"
 num-traits = "0.2"
-rand = "0.8"
+rand = "0.9"
 sha2 = "0.10"
-thiserror = "1.0"
+thiserror = "2.0"
 unicode-segmentation = "1.0"
 
-everscale-types = { version = "0.1.2", default-features = false, features = [
+tycho-types = { version = "0.2.1", default-features = false, features = [
     "sync",
     "base64",
     "models",
 ] }
+tycho-vm = { version = "0.2.0", features = ["dump"] }
 
 fift-proc = { path = "./proc", version = "=0.1.15" }
-
-[patch.crates-io]
-everscale-types = { git = "https://github.com/broxus/everscale-types.git", rev = "6e3c289f9bbf46337b11b24656a9c87ce409323e" }

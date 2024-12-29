@@ -1,10 +1,12 @@
-use std::rc::Rc;
-
 use anyhow::Result;
+use tycho_vm::SafeRc;
 
 use super::cont::{Cont, ContImpl, ContextTailWordFunc, ContextWordFunc, StackWordFunc};
-use super::stack::{HashMapTreeKey, HashMapTreeKeyRef, HashMapTreeNode, SharedBox, StackValue};
-use super::StackValueType;
+use super::stack::{
+    DynFiftValue, HashMapTreeKey, HashMapTreeKeyRef, HashMapTreeNode, SharedBox, StackValue,
+    StackValueType,
+};
+use super::{DynFiftCont, IntoDynFiftCont};
 
 pub struct Dictionaries {
     pub current: Dictionary,
@@ -51,19 +53,19 @@ impl Dictionaries {
 
 #[derive(Default, Clone, Eq, PartialEq)]
 pub struct Dictionary {
-    words: Rc<SharedBox>,
+    words: SafeRc<SharedBox>,
 }
 
 impl Dictionary {
-    pub fn set_words_box(&mut self, words: Rc<SharedBox>) {
+    pub fn set_words_box(&mut self, words: SafeRc<SharedBox>) {
         self.words = words;
     }
 
-    pub fn get_words_box(&self) -> &Rc<SharedBox> {
+    pub fn get_words_box(&self) -> &SafeRc<SharedBox> {
         &self.words
     }
 
-    pub fn clone_words_map(&self) -> Result<Option<Rc<HashMapTreeNode>>> {
+    pub fn clone_words_map(&self) -> Result<Option<SafeRc<HashMapTreeNode>>> {
         let words = self.words.fetch();
         Ok(match words.ty() {
             StackValueType::Null => None,
@@ -93,7 +95,7 @@ impl Dictionary {
         Ok(DictionaryEntry::try_from_value(node.value.as_ref()))
     }
 
-    pub fn resolve_name(&self, definition: &dyn ContImpl) -> Option<Rc<String>> {
+    pub fn resolve_name(&self, definition: &dyn ContImpl) -> Option<SafeRc<String>> {
         let map = self.words.borrow();
         if let Ok(map) = map.as_hashmap() {
             for entry in map {
@@ -102,7 +104,7 @@ impl Dictionary {
                 };
 
                 // NOTE: erase trait data from fat pointers
-                let left = Rc::as_ptr(cont) as *const ();
+                let left = SafeRc::as_ptr(cont) as *const ();
                 let right = definition as *const _ as *const ();
                 // Compare only the address part
                 if std::ptr::eq(left, right) {
@@ -118,13 +120,10 @@ impl Dictionary {
         name: T,
         f: ContextWordFunc,
     ) -> Result<()> {
-        self.define_word(
-            name,
-            DictionaryEntry {
-                definition: Rc::new(f),
-                active: false,
-            },
-        )
+        self.define_word(name, DictionaryEntry {
+            definition: SafeRc::new_dyn_fift_cont(f),
+            active: false,
+        })
     }
 
     pub fn define_context_tail_word<T: Into<String>>(
@@ -132,13 +131,10 @@ impl Dictionary {
         name: T,
         f: ContextTailWordFunc,
     ) -> Result<()> {
-        self.define_word(
-            name,
-            DictionaryEntry {
-                definition: Rc::new(f),
-                active: false,
-            },
-        )
+        self.define_word(name, DictionaryEntry {
+            definition: SafeRc::new_dyn_fift_cont(f),
+            active: false,
+        })
     }
 
     pub fn define_active_word<T: Into<String>>(
@@ -146,23 +142,17 @@ impl Dictionary {
         name: T,
         f: ContextWordFunc,
     ) -> Result<()> {
-        self.define_word(
-            name,
-            DictionaryEntry {
-                definition: Rc::new(f),
-                active: true,
-            },
-        )
+        self.define_word(name, DictionaryEntry {
+            definition: SafeRc::new_dyn_fift_cont(f),
+            active: true,
+        })
     }
 
     pub fn define_stack_word<T: Into<String>>(&mut self, name: T, f: StackWordFunc) -> Result<()> {
-        self.define_word(
-            name,
-            DictionaryEntry {
-                definition: Rc::new(f),
-                active: false,
-            },
-        )
+        self.define_word(name, DictionaryEntry {
+            definition: SafeRc::new_dyn_fift_cont(f),
+            active: false,
+        })
     }
 
     pub fn define_word<T, E>(&mut self, name: T, word: E) -> Result<()>
@@ -206,12 +196,11 @@ impl DictionaryEntry {
     fn cont_from_value(value: &dyn StackValue) -> Option<(&Cont, bool)> {
         if let Ok(cont) = value.as_cont() {
             return Some((cont, false));
-        } else if let Ok(tuple) = value.as_tuple() {
-            if tuple.len() == 1 {
-                if let Ok(cont) = tuple.first()?.as_cont() {
-                    return Some((cont, true));
-                }
-            }
+        } else if let Ok(tuple) = value.as_tuple()
+            && tuple.len() == 1
+            && let Ok(cont) = tuple.first()?.as_cont()
+        {
+            return Some((cont, true));
         }
         None
     }
@@ -226,20 +215,20 @@ impl From<Cont> for DictionaryEntry {
     }
 }
 
-impl<T: ContImpl + 'static> From<Rc<T>> for DictionaryEntry {
-    fn from(value: Rc<T>) -> Self {
+impl<T: ContImpl + 'static> From<SafeRc<T>> for DictionaryEntry {
+    fn from(value: SafeRc<T>) -> Self {
         Self {
-            definition: value,
+            definition: value.into_dyn_fift_cont(),
             active: false,
         }
     }
 }
 
-impl From<DictionaryEntry> for Rc<dyn StackValue> {
+impl From<DictionaryEntry> for SafeRc<dyn StackValue> {
     fn from(value: DictionaryEntry) -> Self {
-        let cont: Rc<dyn StackValue> = Rc::new(value.definition);
+        let cont = SafeRc::new_dyn_fift_value(value.definition);
         if value.active {
-            Rc::new(vec![cont])
+            SafeRc::new_dyn_fift_value(vec![cont])
         } else {
             cont
         }
@@ -247,12 +236,12 @@ impl From<DictionaryEntry> for Rc<dyn StackValue> {
 }
 
 pub struct WordsRefMut<'a> {
-    words_box: &'a mut Rc<SharedBox>,
-    map: Option<Rc<HashMapTreeNode>>,
+    words_box: &'a mut SafeRc<SharedBox>,
+    map: Option<SafeRc<HashMapTreeNode>>,
 }
 
 impl std::ops::Deref for WordsRefMut<'_> {
-    type Target = Option<Rc<HashMapTreeNode>>;
+    type Target = Option<SafeRc<HashMapTreeNode>>;
 
     #[inline]
     fn deref(&self) -> &Self::Target {

@@ -3,7 +3,6 @@ use std::process::Stdio;
 
 use anyhow::{Context as _, Result};
 use bitflags::bitflags;
-
 use fift::core::*;
 
 pub struct ShellUtils;

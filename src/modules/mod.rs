@@ -1,9 +1,7 @@
 use std::iter::Peekable;
-use std::rc::Rc;
 
 use anyhow::{Context as _, Result};
-
-use crate::core::*;
+use tycho_vm::SafeRc;
 
 pub use self::arithmetic::Arithmetic;
 pub use self::cell_utils::CellUtils;
@@ -14,6 +12,7 @@ pub use self::dict_utils::DictUtils;
 pub use self::stack_utils::StackUtils;
 pub use self::string_utils::StringUtils;
 pub use self::vm_utils::VmUtils;
+use crate::core::*;
 
 mod arithmetic;
 mod cell_utils;
@@ -136,15 +135,17 @@ impl FiftModule for BaseModule {
     fn interpret_tuple_push(stack: &mut Stack) -> Result<()> {
         let value = stack.pop()?;
         let mut tuple = stack.pop_tuple()?;
-        Rc::make_mut(&mut tuple).push(value);
-        stack.push_raw(tuple)
+        SafeRc::make_mut(&mut tuple).push(value);
+        stack.push_raw(tuple.into_dyn_fift_value())
     }
 
     #[cmd(name = "tpop", stack)]
     fn interpret_tuple_pop(stack: &mut Stack) -> Result<()> {
         let mut tuple = stack.pop_tuple()?;
-        let last = Rc::make_mut(&mut tuple).pop().context("Tuple underflow")?;
-        stack.push_raw(tuple)?;
+        let last = SafeRc::make_mut(&mut tuple)
+            .pop()
+            .context("Tuple underflow")?;
+        stack.push_raw(tuple.into_dyn_fift_value())?;
         stack.push_raw(last)
     }
 
@@ -154,13 +155,13 @@ impl FiftModule for BaseModule {
         let mut tuple = stack.pop_tuple()?;
 
         let moved: Vec<_> = {
-            let tuple = Rc::make_mut(&mut tuple);
+            let tuple = SafeRc::make_mut(&mut tuple);
             (0..n)
                 .map(|_| tuple.pop().context("Tuple underflow"))
                 .collect::<Result<_>>()?
         };
 
-        stack.push_raw(tuple)?;
+        stack.push_raw(tuple.into_dyn_fift_value())?;
         stack.extend_raw(moved.iter().rev().cloned())
     }
 
@@ -180,10 +181,10 @@ impl FiftModule for BaseModule {
         let idx = stack.pop_usize()?;
         let value = stack.pop()?;
         let mut tuple = stack.pop_tuple()?;
-        *Rc::make_mut(&mut tuple)
+        *SafeRc::make_mut(&mut tuple)
             .get_mut(idx)
             .with_context(|| format!("Index {idx} is out of the tuple range"))? = value;
-        stack.push_raw(tuple)
+        stack.push_raw(tuple.into_dyn_fift_value())
     }
 
     #[cmd(name = "[]!", stack)] // []! (t v i -- t')
@@ -198,8 +199,8 @@ impl FiftModule for BaseModule {
             format!("insertion index (is {idx}) should be <= len (is {l})")
         );
 
-        Rc::make_mut(&mut tuple).insert(idx, value);
-        stack.push_raw(tuple)
+        SafeRc::make_mut(&mut tuple).insert(idx, value);
+        stack.push_raw(tuple.into_dyn_fift_value())
     }
 
     #[cmd(name = "[]>$", stack, args(pop_sep = false))] //  []>$   (t[S0, S1, ..., Sn]   -- S)
@@ -216,10 +217,10 @@ impl FiftModule for BaseModule {
 
         let mut first = true;
         for item in tuple {
-            if let Some(sep) = sep.as_deref() {
-                if !std::mem::take(&mut first) {
-                    result.push_str(sep);
-                }
+            if let Some(sep) = sep.as_deref()
+                && !std::mem::take(&mut first)
+            {
+                result.push_str(sep);
             }
             result.push_str(item.as_string()?);
         }
@@ -278,8 +279,10 @@ impl FiftModule for BaseModule {
     #[cmd(name = "allot", stack)]
     fn interpret_allot(stack: &mut Stack) -> Result<()> {
         let n = stack.pop_smallint_range(0, u32::MAX)?;
-        let mut tuple = Vec::<Rc<dyn StackValue>>::new();
-        tuple.resize_with(n as usize, || Rc::new(SharedBox::default()));
+        let mut tuple = Vec::<SafeRc<dyn StackValue>>::new();
+        tuple.resize_with(n as usize, || {
+            SafeRc::new_dyn_fift_value(SharedBox::default())
+        });
         stack.push(tuple)
     }
 
@@ -372,9 +375,9 @@ impl FiftModule for BaseModule {
         let Some(map) = ctx.stack.pop_hashmap()? else {
             return Ok(None);
         };
-        Ok(Some(Rc::new(cont::LoopCont::new(
+        Ok(Some(SafeRc::new_dyn_fift_cont(cont::LoopCont::new(
             HmapIterCont {
-                iter: map.owned_iter().peekable(),
+                iter: HashMapTreeNode::owned_iter(map).peekable(),
                 ok: true,
             },
             func,

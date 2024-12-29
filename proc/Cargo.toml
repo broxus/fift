@@ -3,7 +3,7 @@ name = "fift-proc"
 description = "Proc-macro helpers for fift"
 repository = "https://github.com/broxus/fift"
 version = "0.1.15"
-edition = "2021"
+edition = "2024"
 include = ["src/**/*.rs", "../LICENSE-*", "../README.md"]
 license = "MIT OR Apache-2.0"
 
@@ -13,4 +13,4 @@ proc-macro = true
 [dependencies]
 quote = "1.0"
 syn = "2.0"
-darling = "0.20.10"
+darling = "0.20.11"

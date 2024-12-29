@@ -4,24 +4,24 @@ use std::rc::Rc;
 use ahash::HashMap;
 use anyhow::Result;
 use dyn_clone::DynClone;
-use everscale_types::prelude::*;
 use num_bigint::BigInt;
 use num_traits::{One, ToPrimitive, Zero};
-use rand::Rng;
+use tycho_types::prelude::*;
+pub use tycho_vm::OwnedCellSlice;
+use tycho_vm::{SafeDelete, SafeRc, SafeRcMakeMut};
 
 use super::cont::*;
-use crate::util::DisplaySliceExt;
 
 pub struct Stack {
-    items: Vec<Rc<dyn StackValue>>,
+    items: Vec<SafeRc<dyn StackValue>>,
     capacity: Option<usize>,
     atoms: Atoms,
 }
 
 impl Stack {
-    pub fn make_null() -> Rc<dyn StackValue> {
+    pub fn make_null() -> SafeRc<dyn StackValue> {
         thread_local! {
-            static NULL: Rc<dyn StackValue> = Rc::new(());
+            static NULL: SafeRc<dyn StackValue> = SafeRc::new_dyn_fift_value(());
         }
         NULL.with(|v| v.clone())
     }
@@ -51,7 +51,7 @@ impl Stack {
         Ok(())
     }
 
-    pub fn fetch(&self, idx: usize) -> Result<Rc<dyn StackValue>> {
+    pub fn fetch(&self, idx: usize) -> Result<SafeRc<dyn StackValue>> {
         let len = self.items.len();
         anyhow::ensure!(idx < len, StackError::StackUnderflow(idx));
         Ok(self.items[len - idx - 1].clone())
@@ -62,15 +62,15 @@ impl Stack {
         anyhow::ensure!(lhs < len, StackError::StackUnderflow(lhs));
         anyhow::ensure!(rhs < len, StackError::StackUnderflow(rhs));
         self.items.swap(len - lhs - 1, len - rhs - 1);
-        //eprintln!("AFTER SWAP: {}", self.display_dump());
+        // eprintln!("AFTER SWAP: {}", self.display_dump());
         Ok(())
     }
 
     pub fn push<T: StackValue + 'static>(&mut self, item: T) -> Result<()> {
-        self.push_raw(Rc::new(item))
+        self.push_raw(SafeRc::new_dyn_fift_value(item))
     }
 
-    pub fn push_raw(&mut self, item: Rc<dyn StackValue>) -> Result<()> {
+    pub fn push_raw(&mut self, item: SafeRc<dyn StackValue>) -> Result<()> {
         if let Some(capacity) = &mut self.capacity {
             anyhow::ensure!(
                 self.items.len() < *capacity,
@@ -79,14 +79,14 @@ impl Stack {
             *capacity += 1;
         }
         self.items.push(item);
-        //eprintln!("AFTER PUSH: {}", self.display_dump());
+        // eprintln!("AFTER PUSH: {}", self.display_dump());
         Ok(())
     }
 
     pub fn extend_raw<T>(&mut self, items: T) -> Result<()>
     where
         T: IntoIterator,
-        T::Item: Into<Rc<dyn StackValue>>,
+        T::Item: Into<SafeRc<dyn StackValue>>,
     {
         for item in items {
             self.push_raw(item.into())?;
@@ -114,10 +114,13 @@ impl Stack {
         }
     }
 
-    pub fn push_opt_raw<T: StackValue + 'static>(&mut self, value: Option<Rc<T>>) -> Result<()> {
+    pub fn push_opt_raw<T: StackValue + 'static>(
+        &mut self,
+        value: Option<SafeRc<T>>,
+    ) -> Result<()> {
         match value {
             None => self.push_null(),
-            Some(value) => self.push_raw(value),
+            Some(value) => self.push_raw(value.into_dyn_fift_value()),
         }
     }
 
@@ -130,8 +133,8 @@ impl Stack {
         self.push_raw(NopCont::value_instance())
     }
 
-    pub fn pop(&mut self) -> Result<Rc<dyn StackValue>> {
-        //eprintln!("BEFORE POP: {}", self.display_dump());
+    pub fn pop(&mut self) -> Result<SafeRc<dyn StackValue>> {
+        // eprintln!("BEFORE POP: {}", self.display_dump());
         self.items
             .pop()
             .ok_or(StackError::StackUnderflow(0))
@@ -144,10 +147,11 @@ impl Stack {
 
     pub fn pop_smallint_range(&mut self, min: u32, max: u32) -> Result<u32> {
         let item = self.pop_int()?;
-        if let Some(item) = item.to_u32() {
-            if item >= min && item <= max {
-                return Ok(item);
-            }
+        if let Some(item) = item.to_u32()
+            && item >= min
+            && item <= max
+        {
+            return Ok(item);
         }
         anyhow::bail!(StackError::IntegerOutOfRange {
             min,
@@ -158,14 +162,30 @@ impl Stack {
 
     pub fn pop_smallint_signed_range(&mut self, min: i32, max: i32) -> Result<i32> {
         let item = self.pop_int()?;
-        if let Some(item) = item.to_i32() {
-            if item >= min && item <= max {
-                return Ok(item);
-            }
+        if let Some(item) = item.to_i32()
+            && item >= min
+            && item <= max
+        {
+            return Ok(item);
         }
         anyhow::bail!(StackError::IntegerOutOfSignedRange {
             min: min as isize,
             max: max as isize,
+            actual: item.to_string(),
+        })
+    }
+
+    pub fn pop_long_range(&mut self, min: u64, max: u64) -> Result<u64> {
+        let item = self.pop_int()?;
+        if let Some(item) = item.to_u64()
+            && item >= min
+            && item <= max
+        {
+            return Ok(item);
+        }
+        anyhow::bail!(StackError::IntegerOutOfRange {
+            min: min as _,
+            max: max as usize,
             actual: item.to_string(),
         })
     }
@@ -184,96 +204,95 @@ impl Stack {
 
     pub fn pop_smallint_char(&mut self) -> Result<char> {
         let item = self.pop_int()?;
-        if let Some(item) = item.to_u32() {
-            if item <= char::MAX as u32 {
-                if let Some(char) = char::from_u32(item) {
-                    return Ok(char);
-                }
-            }
+        if let Some(item) = item.to_u32()
+            && item <= char::MAX as u32
+            && let Some(char) = char::from_u32(item)
+        {
+            return Ok(char);
         }
         anyhow::bail!(StackError::InvalidChar(item.to_string()))
     }
 
-    pub fn pop_int(&mut self) -> Result<Rc<BigInt>> {
+    pub fn pop_int(&mut self) -> Result<SafeRc<BigInt>> {
         self.pop()?.into_int()
     }
 
-    pub fn pop_string(&mut self) -> Result<Rc<String>> {
+    pub fn pop_string(&mut self) -> Result<SafeRc<String>> {
         self.pop()?.into_string()
     }
 
     pub fn pop_string_owned(&mut self) -> Result<String> {
-        Ok(match Rc::try_unwrap(self.pop()?.into_string()?) {
+        Ok(match SafeRc::try_unwrap(self.pop()?.into_string()?) {
             Ok(inner) => inner,
             Err(rc) => rc.as_ref().clone(),
         })
     }
 
-    pub fn pop_bytes(&mut self) -> Result<Rc<Vec<u8>>> {
+    pub fn pop_bytes(&mut self) -> Result<SafeRc<Vec<u8>>> {
         self.pop()?.into_bytes()
     }
 
     pub fn pop_bytes_owned(&mut self) -> Result<Vec<u8>> {
-        Ok(match Rc::try_unwrap(self.pop()?.into_bytes()?) {
+        Ok(match SafeRc::try_unwrap(self.pop()?.into_bytes()?) {
             Ok(inner) => inner,
             Err(rc) => rc.as_ref().clone(),
         })
     }
 
-    pub fn pop_cell(&mut self) -> Result<Rc<Cell>> {
+    pub fn pop_cell(&mut self) -> Result<SafeRc<Cell>> {
         self.pop()?.into_cell()
     }
 
-    pub fn pop_builder(&mut self) -> Result<Rc<CellBuilder>> {
+    pub fn pop_builder(&mut self) -> Result<SafeRc<CellBuilder>> {
         self.pop()?.into_builder()
     }
 
     pub fn pop_builder_owned(&mut self) -> Result<CellBuilder> {
-        Ok(match Rc::try_unwrap(self.pop()?.into_builder()?) {
+        Ok(match SafeRc::try_unwrap(self.pop()?.into_builder()?) {
             Ok(inner) => inner,
             Err(rc) => rc.as_ref().clone(),
         })
     }
 
-    pub fn pop_slice(&mut self) -> Result<Rc<OwnedCellSlice>> {
-        self.pop()?.into_slice()
+    pub fn pop_cell_slice(&mut self) -> Result<SafeRc<OwnedCellSlice>> {
+        self.pop()?.into_cell_slice()
     }
 
-    pub fn pop_cont(&mut self) -> Result<Rc<Cont>> {
+    pub fn pop_cont(&mut self) -> Result<SafeRc<Cont>> {
         self.pop()?.into_cont()
     }
 
     pub fn pop_cont_owned(&mut self) -> Result<Cont> {
-        Ok(match Rc::try_unwrap(self.pop()?.into_cont()?) {
+        Ok(match SafeRc::try_unwrap(self.pop()?.into_cont()?) {
             Ok(inner) => inner,
             Err(rc) => rc.as_ref().clone(),
         })
     }
 
-    pub fn pop_word_list(&mut self) -> Result<Rc<WordList>> {
+    pub fn pop_word_list(&mut self) -> Result<SafeRc<WordList>> {
         self.pop()?.into_word_list()
     }
 
-    pub fn pop_tuple(&mut self) -> Result<Rc<StackTuple>> {
+    pub fn pop_tuple(&mut self) -> Result<SafeRc<StackTuple>> {
         self.pop()?.into_tuple()
     }
 
     pub fn pop_tuple_owned(&mut self) -> Result<StackTuple> {
-        Ok(match Rc::try_unwrap(self.pop()?.into_tuple()?) {
+        Ok(match SafeRc::try_unwrap(self.pop()?.into_tuple()?) {
             Ok(inner) => inner,
             Err(rc) => rc.as_ref().clone(),
         })
     }
 
-    pub fn pop_shared_box(&mut self) -> Result<Rc<SharedBox>> {
+    pub fn pop_shared_box(&mut self) -> Result<SafeRc<SharedBox>> {
         self.pop()?.into_shared_box()
     }
 
-    pub fn pop_atom(&mut self) -> Result<Rc<Atom>> {
+    pub fn pop_atom(&mut self) -> Result<SafeRc<Atom>> {
         self.pop()?.into_atom()
     }
 
-    pub fn pop_hashmap(&mut self) -> Result<Option<Rc<HashMapTreeNode>>> {
+    pub fn pop_hashmap(&mut self) -> Result<Option<SafeRc<HashMapTreeNode>>> {
         let value = self.pop()?;
         if value.is_null() {
             Ok(None)
@@ -282,7 +301,7 @@ impl Stack {
         }
     }
 
-    pub fn items(&self) -> &[Rc<dyn StackValue>] {
+    pub fn items(&self) -> &[SafeRc<dyn StackValue>] {
         &self.items
     }
 
@@ -344,7 +363,7 @@ macro_rules! define_stack_value {
             $($name),*,
         }
 
-        pub trait $trait: DynClone {
+        pub trait $trait: SafeDelete + DynClone {
             fn ty(&self) -> $value_type;
 
             fn is_equal(&self, other: &dyn $trait) -> bool;
@@ -409,46 +428,46 @@ define_stack_value! {
             eq(_, _) = true,
             fmt_dump(_, f) = f.write_str("(null)"),
             as_null(v): &() = Ok(v),
-            into_null,
+            rc_into_null,
         },
         Int(BigInt) = {
             eq(a, b) = a == b,
             fmt_dump(v, f) = std::fmt::Display::fmt(v, f),
             as_int(v): &BigInt = Ok(v),
-            into_int,
+            rc_into_int,
         },
         Cell(Cell) = {
             eq(a, b) = a.as_ref() == b.as_ref(),
             fmt_dump(v, f) = write!(f, "C{{{}}}", v.repr_hash()),
             as_cell(v): &Cell = Ok(v),
-            into_cell,
+            rc_into_cell,
         },
         Builder(CellBuilder) = {
             eq(a, b) = a == b,
             fmt_dump(v, f) = {
-                let bytes = (v.size_bits() + 7) / 8;
+                let bytes = v.size_bits().div_ceil(8);
                 write!(f, "BC{{{}, bits={}}}", hex::encode(&v.raw_data()[..bytes as usize]), v.size_bits())
             },
             as_builder(v): &CellBuilder = Ok(v),
-            into_builder,
+            rc_into_builder,
         },
         Slice(OwnedCellSlice) = {
             eq(a, b) = *a == b,
             fmt_dump(v, f) = std::fmt::Display::fmt(v, f),
-            as_slice(v): CellSlice = v.apply(),
-            into_slice,
+            as_slice(v): CellSlice<'_> = Ok(v.apply()),
+            rc_into_cell_slice,
         },
         String(String) = {
             eq(a, b) = a == b,
             fmt_dump(v, f) = write!(f, "\"{v}\""),
             as_string(v): &str = Ok(v),
-            into_string,
+            rc_into_string,
         },
         Bytes(Vec<u8>) = {
             eq(a, b) = a == b,
             fmt_dump(v, f) = write!(f, "BYTES:{}", hex::encode_upper(v)),
             as_bytes(v): &[u8] = Ok(v),
-            into_bytes,
+            rc_into_bytes,
         },
         Tuple(StackTuple) = {
             eq(a, b) = {
@@ -469,25 +488,21 @@ define_stack_value! {
                 f.write_str(" ]")
             },
             as_tuple(v): &StackTuple = Ok(v),
-            into_tuple,
+            rc_into_tuple,
         },
         Cont(Cont) = {
-            eq(a, b) = {
-                let a = Rc::as_ptr(a) as *const ();
-                let b = Rc::as_ptr(b) as *const ();
-                std::ptr::eq(a, b)
-            },
-            fmt_dump(v, f) = write!(f, "Cont{{{:?}}}", Rc::as_ptr(v)),
+            eq(a, b) = SafeRc::ptr_eq(a, b),
+            fmt_dump(v, f) = write!(f, "Cont{{{:?}}}", SafeRc::as_ptr(v) as *const ()),
             as_cont(v): &Cont = Ok(v),
-            into_cont,
+            rc_into_cont,
         },
         WordList(WordList) = {
             eq(a, b) = a == b,
             fmt_dump(v, f) = write!(f, "WordList{{{:?}}}", &v as *const _),
             as_word_list(v): &WordList = Ok(v),
-            into_word_list,
+            rc_into_word_list,
             {
-                fn into_cont(self: Rc<Self>) -> Result<Rc<Cont>> {
+                fn rc_into_cont(self: Rc<Self>) -> Result<Rc<Cont>> {
                     Ok(Rc::new(self.finish()))
                 }
             }
@@ -496,19 +511,19 @@ define_stack_value! {
             eq(a, b) = a == b,
             fmt_dump(v, f) = write!(f, "Box{{{:?}}}", Rc::as_ptr(&v.value)),
             as_box(v): &SharedBox = Ok(v),
-            into_shared_box,
+            rc_into_shared_box,
         },
         Atom(Atom) = {
             eq(a, b) = a == b,
             fmt_dump(v, f) = std::fmt::Display::fmt(v, f),
             as_atom(v): &Atom = Ok(v),
-            into_atom,
+            rc_into_atom,
         },
         HashMap(HashMapTreeNode) = {
             eq(a, b) = a == b,
             fmt_dump(v, f) = write!(f, "HashMap{{{:?}}}", &v as *const _),
             as_hashmap(v): &HashMapTreeNode = Ok(v),
-            into_hashmap,
+            rc_into_hashmap,
         }
     }
 }
@@ -606,64 +621,115 @@ impl dyn StackValue + '_ {
     }
 }
 
-pub type StackTuple = Vec<Rc<dyn StackValue>>;
+pub trait DynFiftValue {
+    fn new_dyn_fift_value<T: StackValue + 'static>(value: T) -> SafeRc<dyn StackValue>;
 
-#[derive(Clone)]
-pub struct OwnedCellSlice {
-    cell: Cell,
-    range: CellSliceRange,
+    fn into_int(self) -> Result<SafeRc<BigInt>>;
+    fn into_string(self) -> Result<SafeRc<String>>;
+    fn into_bytes(self) -> Result<SafeRc<Vec<u8>>>;
+    fn into_cell(self) -> Result<SafeRc<Cell>>;
+    fn into_builder(self) -> Result<SafeRc<CellBuilder>>;
+    fn into_cell_slice(self) -> Result<SafeRc<OwnedCellSlice>>;
+    fn into_cont(self) -> Result<SafeRc<Cont>>;
+    fn into_word_list(self) -> Result<SafeRc<WordList>>;
+    fn into_tuple(self) -> Result<SafeRc<StackTuple>>;
+    fn into_shared_box(self) -> Result<SafeRc<SharedBox>>;
+    fn into_atom(self) -> Result<SafeRc<Atom>>;
+    fn into_hashmap(self) -> Result<SafeRc<HashMapTreeNode>>;
 }
 
-impl OwnedCellSlice {
-    pub fn new(cell: Cell) -> Self {
-        let range = CellSliceRange::full(cell.as_ref());
-        Self { cell, range }
+impl DynFiftValue for SafeRc<dyn StackValue> {
+    #[inline]
+    fn new_dyn_fift_value<T: StackValue + 'static>(value: T) -> SafeRc<dyn StackValue> {
+        let value: Rc<dyn StackValue> = Rc::new(value);
+        SafeRc::from(value)
     }
 
-    pub fn apply(&self) -> Result<CellSlice<'_>> {
-        self.range.apply(&self.cell).map_err(From::from)
+    #[inline]
+    fn into_int(self) -> Result<SafeRc<BigInt>> {
+        Self::into_inner(self).rc_into_int().map(SafeRc::from)
     }
 
-    pub fn range(&self) -> CellSliceRange {
-        self.range
+    fn into_string(self) -> Result<SafeRc<String>> {
+        Self::into_inner(self).rc_into_string().map(SafeRc::from)
     }
 
-    pub fn set_range(&mut self, range: CellSliceRange) {
-        self.range = range
+    fn into_bytes(self) -> Result<SafeRc<Vec<u8>>> {
+        Self::into_inner(self).rc_into_bytes().map(SafeRc::from)
+    }
+
+    fn into_cell(self) -> Result<SafeRc<Cell>> {
+        Self::into_inner(self).rc_into_cell().map(SafeRc::from)
+    }
+
+    fn into_builder(self) -> Result<SafeRc<CellBuilder>> {
+        Self::into_inner(self).rc_into_builder().map(SafeRc::from)
+    }
+
+    fn into_cell_slice(self) -> Result<SafeRc<OwnedCellSlice>> {
+        Self::into_inner(self)
+            .rc_into_cell_slice()
+            .map(SafeRc::from)
+    }
+
+    fn into_cont(self) -> Result<SafeRc<Cont>> {
+        Self::into_inner(self).rc_into_cont().map(SafeRc::from)
+    }
+
+    fn into_word_list(self) -> Result<SafeRc<WordList>> {
+        Self::into_inner(self).rc_into_word_list().map(SafeRc::from)
+    }
+
+    fn into_tuple(self) -> Result<SafeRc<StackTuple>> {
+        Self::into_inner(self).rc_into_tuple().map(SafeRc::from)
+    }
+
+    fn into_shared_box(self) -> Result<SafeRc<SharedBox>> {
+        Self::into_inner(self)
+            .rc_into_shared_box()
+            .map(SafeRc::from)
+    }
+
+    fn into_atom(self) -> Result<SafeRc<Atom>> {
+        Self::into_inner(self).rc_into_atom().map(SafeRc::from)
+    }
+
+    fn into_hashmap(self) -> Result<SafeRc<HashMapTreeNode>> {
+        Self::into_inner(self).rc_into_hashmap().map(SafeRc::from)
     }
 }
 
-impl From<CellSliceParts> for OwnedCellSlice {
-    fn from((cell, range): CellSliceParts) -> Self {
-        Self { cell, range }
+pub trait IntoDynFiftValue {
+    fn into_dyn_fift_value(self) -> SafeRc<dyn StackValue>;
+}
+
+impl<T: StackValue> IntoDynFiftValue for Rc<T> {
+    #[inline]
+    fn into_dyn_fift_value(self) -> SafeRc<dyn StackValue> {
+        let this: Rc<dyn StackValue> = self;
+        SafeRc::from(this)
     }
 }
 
-impl PartialEq<CellSlice<'_>> for OwnedCellSlice {
-    fn eq(&self, right: &CellSlice<'_>) -> bool {
-        if let Ok(left) = self.apply() {
-            if let Ok(std::cmp::Ordering::Equal) = left.lex_cmp(right) {
-                return true;
-            }
-        }
-        false
+impl<T: StackValue> IntoDynFiftValue for SafeRc<T> {
+    #[inline]
+    fn into_dyn_fift_value(self) -> SafeRc<dyn StackValue> {
+        Rc::<T>::into_dyn_fift_value(SafeRc::into_inner(self))
     }
 }
 
-impl std::fmt::Display for OwnedCellSlice {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self.apply() {
-            Ok(slice) => {
-                write!(f, "CS{{{}}}", slice.display_slice_data())
-            }
-            Err(e) => write!(f, "CS{{Invalid: {e:?}}}"),
-        }
-    }
-}
+pub type StackTuple = Vec<SafeRc<dyn StackValue>>;
 
 #[derive(Default, Clone)]
 pub struct WordList {
     pub items: Vec<Cont>,
+}
+
+impl SafeRcMakeMut for WordList {
+    #[inline]
+    fn rc_make_mut(rc: &mut Rc<Self>) -> &mut Self {
+        Rc::make_mut(rc)
+    }
 }
 
 impl WordList {
@@ -672,7 +738,7 @@ impl WordList {
             return self.items.first().unwrap().clone();
         }
 
-        Rc::new(ListCont {
+        Cont::new_dyn_fift_cont(ListCont {
             after: None,
             list: self,
             pos: 0,
@@ -685,17 +751,17 @@ impl Eq for WordList {}
 impl PartialEq for WordList {
     fn eq(&self, other: &Self) -> bool {
         self.items.len() == other.items.len()
-            && self.items.iter().zip(other.items.iter()).all(|(a, b)| {
-                let a = Rc::as_ptr(a) as *const ();
-                let b = Rc::as_ptr(b) as *const ();
-                std::ptr::eq(a, b)
-            })
+            && self
+                .items
+                .iter()
+                .zip(other.items.iter())
+                .all(|(a, b)| SafeRc::ptr_eq(a, b))
     }
 }
 
 #[derive(Clone)]
 pub struct SharedBox {
-    value: Rc<RefCell<Rc<dyn StackValue>>>,
+    value: Rc<RefCell<SafeRc<dyn StackValue>>>,
 }
 
 impl Default for SharedBox {
@@ -707,39 +773,37 @@ impl Default for SharedBox {
 impl Eq for SharedBox {}
 impl PartialEq for SharedBox {
     fn eq(&self, other: &Self) -> bool {
-        let a = Rc::as_ptr(&self.value) as *const ();
-        let b = Rc::as_ptr(&other.value) as *const ();
-        std::ptr::eq(a, b)
+        Rc::ptr_eq(&self.value, &other.value)
     }
 }
 
 impl SharedBox {
-    pub fn new(value: Rc<dyn StackValue>) -> Self {
+    pub fn new(value: SafeRc<dyn StackValue>) -> Self {
         Self {
             value: Rc::new(RefCell::new(value)),
         }
     }
 
-    pub fn store(&self, value: Rc<dyn StackValue>) {
+    pub fn store(&self, value: SafeRc<dyn StackValue>) {
         *self.value.borrow_mut() = value;
     }
 
-    pub fn store_opt<T: StackValue + 'static>(&self, value: Option<Rc<T>>) {
+    pub fn store_opt<T: StackValue + 'static>(&self, value: Option<SafeRc<T>>) {
         *self.value.borrow_mut() = match value {
             None => Stack::make_null(),
-            Some(value) => value,
+            Some(value) => value.into_dyn_fift_value(),
         };
     }
 
-    pub fn fetch(&self) -> Rc<dyn StackValue> {
+    pub fn fetch(&self) -> SafeRc<dyn StackValue> {
         self.value.borrow().clone()
     }
 
-    pub fn take(&self) -> Rc<dyn StackValue> {
+    pub fn take(&self) -> SafeRc<dyn StackValue> {
         std::mem::replace(&mut *self.value.borrow_mut(), Stack::make_null())
     }
 
-    pub fn borrow(&self) -> std::cell::Ref<'_, Rc<dyn StackValue>> {
+    pub fn borrow(&self) -> std::cell::Ref<'_, SafeRc<dyn StackValue>> {
         self.value.borrow()
     }
 }
@@ -804,10 +868,17 @@ impl Atoms {
 #[derive(Clone)]
 pub struct HashMapTreeNode {
     pub key: HashMapTreeKey,
-    pub value: Rc<dyn StackValue>,
-    pub left: Option<Rc<HashMapTreeNode>>,
-    pub right: Option<Rc<HashMapTreeNode>>,
+    pub value: SafeRc<dyn StackValue>,
+    pub left: Option<SafeRc<HashMapTreeNode>>,
+    pub right: Option<SafeRc<HashMapTreeNode>>,
     pub rand_offset: u64,
+}
+
+impl SafeRcMakeMut for HashMapTreeNode {
+    #[inline]
+    fn rc_make_mut(rc: &mut Rc<Self>) -> &mut Self {
+        Rc::make_mut(rc)
+    }
 }
 
 impl Eq for HashMapTreeNode {}
@@ -818,13 +889,13 @@ impl PartialEq for HashMapTreeNode {
 }
 
 impl HashMapTreeNode {
-    pub fn new(key: HashMapTreeKey, value: Rc<dyn StackValue>) -> Self {
+    pub fn new(key: HashMapTreeKey, value: SafeRc<dyn StackValue>) -> Self {
         Self {
             key,
             value,
             left: None,
             right: None,
-            rand_offset: rand::thread_rng().gen(),
+            rand_offset: rand::random(),
         }
     }
 
@@ -832,30 +903,38 @@ impl HashMapTreeNode {
         self.into_iter()
     }
 
-    pub fn owned_iter(self: Rc<Self>) -> HashMapTreeOwnedIter {
+    pub fn owned_iter(this: SafeRc<Self>) -> HashMapTreeOwnedIter {
         HashMapTreeOwnedIter {
-            stack: vec![(self, None)],
+            stack: vec![(this, None)],
         }
     }
 
-    pub fn lookup<K>(root_opt: &Option<Rc<Self>>, key: K) -> Option<&'_ Rc<HashMapTreeNode>>
+    pub fn lookup<K>(root_opt: &Option<SafeRc<Self>>, key: K) -> Option<&'_ SafeRc<HashMapTreeNode>>
     where
         K: AsHashMapTreeKeyRef,
     {
         Self::lookup_internal(root_opt, &key.as_equivalent())
     }
 
-    pub fn set(root_opt: &mut Option<Rc<Self>>, key: &HashMapTreeKey, value: &Rc<dyn StackValue>) {
+    pub fn set(
+        root_opt: &mut Option<SafeRc<Self>>,
+        key: &HashMapTreeKey,
+        value: &SafeRc<dyn StackValue>,
+    ) {
         // TODO: insert new during replace
         if !key.stack_value.is_null()
             && !Self::replace(root_opt, key.as_equivalent(), value)
             && !value.is_null()
         {
-            Self::insert_internal(root_opt, key, value, rand::thread_rng().gen())
+            Self::insert_internal(root_opt, key, value, rand::random())
         }
     }
 
-    pub fn replace<K>(root_opt: &mut Option<Rc<Self>>, key: K, value: &Rc<dyn StackValue>) -> bool
+    pub fn replace<K>(
+        root_opt: &mut Option<SafeRc<Self>>,
+        key: K,
+        value: &SafeRc<dyn StackValue>,
+    ) -> bool
     where
         K: AsHashMapTreeKeyRef,
     {
@@ -865,13 +944,13 @@ impl HashMapTreeNode {
         } else if value.is_null() {
             Self::remove_internal(root_opt, &key).is_some()
         } else if let Some(root) = root_opt {
-            root.replace_internal(&key, value)
+            Self::replace_internal(root, &key, value)
         } else {
             false
         }
     }
 
-    pub fn remove<K>(root_opt: &mut Option<Rc<Self>>, key: K) -> Option<Rc<dyn StackValue>>
+    pub fn remove<K>(root_opt: &mut Option<SafeRc<Self>>, key: K) -> Option<SafeRc<dyn StackValue>>
     where
         K: AsHashMapTreeKeyRef,
     {
@@ -887,9 +966,9 @@ impl HashMapTreeNode {
     }
 
     pub fn lookup_internal<'a>(
-        root_opt: &'a Option<Rc<Self>>,
+        root_opt: &'a Option<SafeRc<Self>>,
         key: &HashMapTreeKeyRef<'_>,
-    ) -> Option<&'a Rc<HashMapTreeNode>> {
+    ) -> Option<&'a SafeRc<HashMapTreeNode>> {
         let mut root = root_opt.as_ref()?;
         loop {
             root = match key.cmp_owned(&root.key) {
@@ -901,13 +980,13 @@ impl HashMapTreeNode {
     }
 
     fn insert_internal(
-        root_opt: &mut Option<Rc<Self>>,
+        root_opt: &mut Option<SafeRc<Self>>,
         key: &HashMapTreeKey,
-        value: &Rc<dyn StackValue>,
+        value: &SafeRc<dyn StackValue>,
         rand_offset: u64,
     ) {
         let Some(mut root) = root_opt.take() else {
-            *root_opt = Some(Rc::new(Self {
+            *root_opt = Some(SafeRc::new(Self {
                 key: key.clone(),
                 value: value.clone(),
                 left: None,
@@ -918,8 +997,8 @@ impl HashMapTreeNode {
         };
 
         *root_opt = Some(if root.rand_offset <= rand_offset {
-            let (left, right) = root.split_internal(key);
-            Rc::new(Self {
+            let (left, right) = Self::split_internal(root, key);
+            SafeRc::new(Self {
                 key: key.clone(),
                 value: value.clone(),
                 left,
@@ -927,7 +1006,7 @@ impl HashMapTreeNode {
                 rand_offset,
             })
         } else {
-            let this = Rc::make_mut(&mut root);
+            let this = SafeRc::make_mut(&mut root);
             let branch = if key < &this.key {
                 &mut this.left
             } else {
@@ -939,83 +1018,83 @@ impl HashMapTreeNode {
     }
 
     fn replace_internal(
-        self: &mut Rc<Self>,
+        this: &mut SafeRc<Self>,
         key: &HashMapTreeKeyRef<'_>,
-        value: &Rc<dyn StackValue>,
+        value: &SafeRc<dyn StackValue>,
     ) -> bool {
         fn replace_internal_impl(
-            root: &mut Rc<HashMapTreeNode>,
+            root: &mut SafeRc<HashMapTreeNode>,
             key: &HashMapTreeKeyRef<'_>,
-            value: &Rc<dyn StackValue>,
+            value: &SafeRc<dyn StackValue>,
         ) -> Option<()> {
             match key.cmp_owned(&root.key) {
                 std::cmp::Ordering::Equal => {
-                    let this = Rc::make_mut(root);
+                    let this = SafeRc::make_mut(root);
                     this.value = value.clone();
                 }
-                std::cmp::Ordering::Less => match Rc::get_mut(root) {
+                std::cmp::Ordering::Less => match SafeRc::get_mut(root) {
                     Some(this) => replace_internal_impl(this.left.as_mut()?, key, value)?,
                     None => {
                         let mut left = root.left.clone()?;
                         replace_internal_impl(&mut left, key, value)?;
-                        Rc::make_mut(root).left = Some(left);
+                        SafeRc::make_mut(root).left = Some(left);
                     }
                 },
-                std::cmp::Ordering::Greater => match Rc::get_mut(root) {
+                std::cmp::Ordering::Greater => match SafeRc::get_mut(root) {
                     Some(this) => replace_internal_impl(this.right.as_mut()?, key, value)?,
                     None => {
                         let mut right = root.right.clone()?;
                         replace_internal_impl(&mut right, key, value)?;
-                        Rc::make_mut(root).right = Some(right);
+                        SafeRc::make_mut(root).right = Some(right);
                     }
                 },
             }
             Some(())
         }
 
-        replace_internal_impl(self, key, value).is_some()
+        replace_internal_impl(this, key, value).is_some()
     }
 
     fn remove_internal(
-        root_opt: &mut Option<Rc<Self>>,
+        root_opt: &mut Option<SafeRc<Self>>,
         key: &HashMapTreeKeyRef<'_>,
-    ) -> Option<Rc<dyn StackValue>> {
+    ) -> Option<SafeRc<dyn StackValue>> {
         let new_root = {
             let root = root_opt.as_mut()?;
             match key.cmp_owned(&root.key) {
                 std::cmp::Ordering::Equal => {
-                    let (left, right) = match Rc::get_mut(root) {
+                    let (left, right) = match SafeRc::get_mut(root) {
                         Some(this) => (this.left.take(), this.right.take()),
                         None => (root.left.clone(), root.right.clone()),
                     };
                     Self::merge_internal(left, right)
                 }
                 std::cmp::Ordering::Less => {
-                    return Some(match Rc::get_mut(root) {
+                    return Some(match SafeRc::get_mut(root) {
                         Some(this) => Self::remove_internal(&mut this.left, key)?,
                         None => {
                             let mut left = root.left.clone();
                             let value = Self::remove_internal(&mut left, key)?;
-                            Rc::make_mut(root).left = left;
+                            SafeRc::make_mut(root).left = left;
                             value
                         }
-                    })
+                    });
                 }
                 std::cmp::Ordering::Greater => {
-                    return Some(match Rc::get_mut(root) {
+                    return Some(match SafeRc::get_mut(root) {
                         Some(this) => Self::remove_internal(&mut this.right, key)?,
                         None => {
                             let mut right = root.right.clone();
                             let value = Self::remove_internal(&mut right, key)?;
-                            Rc::make_mut(root).right = right;
+                            SafeRc::make_mut(root).right = right;
                             value
                         }
-                    })
+                    });
                 }
             }
         };
 
-        let value = match Rc::try_unwrap(root_opt.take().unwrap()) {
+        let value = match SafeRc::try_unwrap(root_opt.take().unwrap()) {
             Ok(this) => this.value,
             Err(this) => this.value.clone(),
         };
@@ -1023,17 +1102,20 @@ impl HashMapTreeNode {
         Some(value)
     }
 
-    fn merge_internal(left: Option<Rc<Self>>, right: Option<Rc<Self>>) -> Option<Rc<Self>> {
+    fn merge_internal(
+        left: Option<SafeRc<Self>>,
+        right: Option<SafeRc<Self>>,
+    ) -> Option<SafeRc<Self>> {
         match (left, right) {
             (None, right) => right,
             (left, None) => left,
             (Some(mut left), Some(mut right)) => {
                 if left.rand_offset > right.rand_offset {
-                    let left_ref = Rc::make_mut(&mut left);
+                    let left_ref = SafeRc::make_mut(&mut left);
                     left_ref.right = Self::merge_internal(left_ref.right.take(), Some(right));
                     Some(left)
                 } else {
-                    let right_ref = Rc::make_mut(&mut right);
+                    let right_ref = SafeRc::make_mut(&mut right);
                     right_ref.left = Self::merge_internal(Some(left), right_ref.left.take());
                     Some(right)
                 }
@@ -1042,33 +1124,33 @@ impl HashMapTreeNode {
     }
 
     fn split_internal(
-        mut self: Rc<Self>,
+        mut this: SafeRc<Self>,
         key: &HashMapTreeKey,
-    ) -> (Option<Rc<Self>>, Option<Rc<Self>>) {
-        match key.cmp(&self.key) {
+    ) -> (Option<SafeRc<Self>>, Option<SafeRc<Self>>) {
+        match key.cmp(&this.key) {
             std::cmp::Ordering::Less => {
-                let Some(left) = (match Rc::get_mut(&mut self) {
+                let Some(left) = (match SafeRc::get_mut(&mut this) {
                     Some(this) => this.left.take(),
-                    None => self.left.clone(),
+                    None => this.left.clone(),
                 }) else {
-                    return (None, Some(self));
+                    return (None, Some(this));
                 };
 
                 let (left, right) = Self::split_internal(left, key);
-                Rc::make_mut(&mut self).left = right;
-                (left, Some(self))
+                SafeRc::make_mut(&mut this).left = right;
+                (left, Some(this))
             }
             _ => {
-                let Some(right) = (match Rc::get_mut(&mut self) {
+                let Some(right) = (match SafeRc::get_mut(&mut this) {
                     Some(this) => this.right.take(),
-                    None => self.right.clone(),
+                    None => this.right.clone(),
                 }) else {
-                    return (Some(self), None);
+                    return (Some(this), None);
                 };
 
                 let (left, right) = Self::split_internal(right, key);
-                Rc::make_mut(&mut self).right = left;
-                (Some(self), right)
+                SafeRc::make_mut(&mut this).right = left;
+                (Some(this), right)
             }
         }
     }
@@ -1120,11 +1202,11 @@ impl<'a> Iterator for HashMapTreeIter<'a> {
 
 #[derive(Default, Clone)]
 pub struct HashMapTreeOwnedIter {
-    stack: Vec<(Rc<HashMapTreeNode>, Option<bool>)>,
+    stack: Vec<(SafeRc<HashMapTreeNode>, Option<bool>)>,
 }
 
 impl Iterator for HashMapTreeOwnedIter {
-    type Item = Rc<HashMapTreeNode>;
+    type Item = SafeRc<HashMapTreeNode>;
 
     fn next(&mut self) -> Option<Self::Item> {
         Some(loop {
@@ -1166,7 +1248,7 @@ impl<T: AsHashMapTreeKeyRef> AsHashMapTreeKeyRef for &T {
 #[derive(Clone)]
 pub struct HashMapTreeKey {
     pub hash: u64,
-    pub stack_value: Rc<dyn StackValue>,
+    pub stack_value: SafeRc<dyn StackValue>,
 }
 
 impl HashMapTreeKey {
@@ -1174,7 +1256,7 @@ impl HashMapTreeKey {
         static HASHER_STATE: ahash::RandomState = ahash::RandomState::new();
     }
 
-    pub fn new(value: Rc<dyn StackValue>) -> Result<Self> {
+    pub fn new(value: SafeRc<dyn StackValue>) -> Result<Self> {
         let hash = Self::HASHER_STATE.with(|hasher| {
             Ok(match value.ty() {
                 StackValueType::Null => 0,
@@ -1197,7 +1279,7 @@ impl From<String> for HashMapTreeKey {
     fn from(value: String) -> Self {
         Self {
             hash: Self::HASHER_STATE.with(|hasher| hasher.hash_one(&value)),
-            stack_value: Rc::new(value),
+            stack_value: SafeRc::new_dyn_fift_value(value),
         }
     }
 }

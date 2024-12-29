@@ -1,14 +1,13 @@
 use std::iter::Peekable;
-use std::rc::Rc;
 
 use anyhow::{Context as _, Result};
-use everscale_types::dict::{self, dict_get, dict_insert, dict_remove_owned, SetMode};
-use everscale_types::prelude::*;
 use num_bigint::BigInt;
+use tycho_types::dict::{self, SetMode, dict_get, dict_insert, dict_remove_owned};
+use tycho_types::prelude::*;
+use tycho_vm::SafeRc;
 
 use crate::core::cont::{LoopCont, LoopContImpl};
 use crate::core::*;
-use crate::util::*;
 
 pub struct DictUtils;
 
@@ -23,28 +22,28 @@ impl DictUtils {
     fn interpret_dict_to_slice(stack: &mut Stack) -> Result<()> {
         let maybe_cell = pop_maybe_cell(stack)?;
         let cell = CellBuilder::build_from(maybe_cell)?;
-        stack.push(OwnedCellSlice::new(cell))
+        stack.push(OwnedCellSlice::new_allow_exotic(cell))
     }
 
     #[cmd(name = "dict,", stack)]
     fn interpret_store_dict(stack: &mut Stack) -> Result<()> {
         let maybe_cell = pop_maybe_cell(stack)?;
         let mut builder = stack.pop_builder()?;
-        maybe_cell.store_into(Rc::make_mut(&mut builder), &mut Cell::empty_context())?;
-        stack.push_raw(builder)
+        maybe_cell.store_into(SafeRc::make_mut(&mut builder), Cell::empty_context())?;
+        stack.push_raw(builder.into_dyn_fift_value())
     }
 
     #[cmd(name = "dict@", stack, args(fetch = false))]
     #[cmd(name = "dict@+", stack, args(fetch = true))]
     fn interpret_load_dict(stack: &mut Stack, fetch: bool) -> Result<()> {
-        let mut cs_raw = stack.pop_slice()?;
-        let mut cs = cs_raw.apply()?;
+        let mut cs_raw = stack.pop_cell_slice()?;
+        let mut cs = cs_raw.apply();
         let cell = Option::<Cell>::load_from(&mut cs)?;
         stack.push_opt(cell)?;
         if fetch {
             let range = cs.range();
-            Rc::make_mut(&mut cs_raw).set_range(range);
-            stack.push_raw(cs_raw)?;
+            SafeRc::make_mut(&mut cs_raw).set_range(range);
+            stack.push_raw(cs_raw.into_dyn_fift_value())?;
         }
         Ok(())
     }
@@ -74,20 +73,20 @@ impl DictUtils {
         );
 
         let value = if b {
-            OwnedCellSlice::new(stack.pop_builder_owned()?.build()?)
+            OwnedCellSlice::new_allow_exotic(stack.pop_builder_owned()?.build()?)
         } else {
-            stack.pop_slice()?.as_ref().clone()
+            stack.pop_cell_slice()?.as_ref().clone()
         };
-        let value = value.apply()?;
+        let value = value.apply();
 
-        let mut key = key.apply()?.get_prefix(bits, 0);
+        let mut key = key.apply().get_prefix(bits, 0);
         let res = dict_insert(
             &mut cell,
             &mut key,
             bits,
             &value,
             mode,
-            &mut Cell::empty_context(),
+            Cell::empty_context(),
         );
 
         // TODO: use operation result flag?
@@ -110,8 +109,8 @@ impl DictUtils {
             "Not enough bits for a dictionary key"
         );
 
-        let key = key.apply()?.get_prefix(bits, 0);
-        let value = dict_get(cell.as_ref(), bits, key, &mut Cell::empty_context())
+        let key = key.apply().get_prefix(bits, 0);
+        let value = dict_get(cell.as_ref(), bits, key, Cell::empty_context())
             .ok()
             .flatten();
 
@@ -120,7 +119,7 @@ impl DictUtils {
             // TODO: add owned `dict_get` to remove this intermediate builder
             let mut builder = CellBuilder::new();
             builder.store_slice(value)?;
-            stack.push(OwnedCellSlice::new(builder.build()?))?;
+            stack.push(OwnedCellSlice::new_allow_exotic(builder.build()?))?;
         }
         stack.push_bool(res)
     }
@@ -140,18 +139,16 @@ impl DictUtils {
             "Not enough bits for a dictionary key"
         );
 
-        let key = &mut key.apply()?.get_prefix(bits, 0);
-        let value = dict_remove_owned(&mut dict, key, bits, false, &mut Cell::empty_context())
+        let key = &mut key.apply().get_prefix(bits, 0);
+        let value = dict_remove_owned(&mut dict, key, bits, false, Cell::empty_context())
             .ok()
             .flatten();
 
         stack.push_opt(dict)?;
 
         let found = value.is_some();
-        if !ignore {
-            if let Some(value) = value {
-                stack.push(OwnedCellSlice::from(value))?;
-            }
+        if !ignore && let Some(value) = value {
+            stack.push(OwnedCellSlice::from(value))?;
         }
         stack.push_bool(found)
     }
@@ -163,7 +160,7 @@ impl DictUtils {
         let func = ctx.stack.pop_cont_owned()?;
         let bits = ctx.stack.pop_smallint_range(0, MAX_KEY_BITS)? as u16;
         let cell = pop_maybe_cell(&mut ctx.stack)?;
-        Ok(Some(Rc::new(LoopCont::new(
+        Ok(Some(Cont::new_dyn_fift_cont(LoopCont::new(
             DictMapCont {
                 iter: OwnedDictIter::new(cell, bits, false, s).peekable(),
                 pos: None,
@@ -184,7 +181,7 @@ impl DictUtils {
         let func = ctx.stack.pop_cont_owned()?;
         let bits = ctx.stack.pop_smallint_range(0, MAX_KEY_BITS)? as u16;
         let cell = pop_maybe_cell(&mut ctx.stack)?;
-        Ok(Some(Rc::new(LoopCont::new(
+        Ok(Some(Cont::new_dyn_fift_cont(LoopCont::new(
             DictIterCont {
                 iter: OwnedDictIter::new(cell, bits, r, s).peekable(),
                 signed: s,
@@ -201,7 +198,7 @@ impl DictUtils {
         let bits = ctx.stack.pop_smallint_range(0, MAX_KEY_BITS)? as u16;
         let right = pop_maybe_cell(&mut ctx.stack)?;
         let left = pop_maybe_cell(&mut ctx.stack)?;
-        Ok(Some(Rc::new(LoopCont::new(
+        Ok(Some(Cont::new_dyn_fift_cont(LoopCont::new(
             DictMergeCont {
                 left: OwnedDictIter::new(left, bits, false, false).peekable(),
                 right: OwnedDictIter::new(right, bits, false, false).peekable(),
@@ -219,7 +216,7 @@ impl DictUtils {
         let bits = ctx.stack.pop_smallint_range(0, MAX_KEY_BITS)? as u16;
         let right = pop_maybe_cell(&mut ctx.stack)?;
         let left = pop_maybe_cell(&mut ctx.stack)?;
-        Ok(Some(Rc::new(LoopCont::new(
+        Ok(Some(Cont::new_dyn_fift_cont(LoopCont::new(
             DictDiffCont {
                 left: OwnedDictIter::new(left, bits, false, false).peekable(),
                 right: OwnedDictIter::new(right, bits, false, false).peekable(),
@@ -234,7 +231,7 @@ impl DictUtils {
 #[derive(Clone)]
 struct DictMapCont {
     iter: Peekable<OwnedDictIter>,
-    pos: Option<CellBuilder>,
+    pos: Option<CellDataBuilder>,
     result: Option<Cell>,
     extended: bool,
     signed: bool,
@@ -269,7 +266,7 @@ impl LoopContImpl for DictMapCont {
                 key.size_bits(),
                 &value.as_full_slice(),
                 SetMode::Set,
-                &mut Cell::empty_context(),
+                Cell::empty_context(),
             )?;
         }
 
@@ -305,7 +302,7 @@ impl LoopContImpl for DictDiffCont {
                         let (key, left_value) = self.left.next().unwrap()?;
                         let (_, right_value) = self.right.next().unwrap()?;
 
-                        if left_value.apply()?.lex_cmp(&right_value.apply()?)?
+                        if left_value.apply().lex_cmp(&right_value.apply())?
                             == std::cmp::Ordering::Equal
                         {
                             continue;
@@ -347,7 +344,7 @@ impl LoopContImpl for DictDiffCont {
 struct DictMergeCont {
     left: Peekable<OwnedDictIter>,
     right: Peekable<OwnedDictIter>,
-    pos: Option<CellBuilder>,
+    pos: Option<CellDataBuilder>,
     result: Option<Cell>,
 }
 
@@ -355,7 +352,7 @@ impl LoopContImpl for DictMergeCont {
     fn pre_exec(&mut self, ctx: &mut Context) -> Result<bool> {
         fn clone_error(
             res: &<OwnedDictIter as Iterator>::Item,
-        ) -> Result<&(CellBuilder, OwnedCellSlice)> {
+        ) -> Result<&(CellDataBuilder, OwnedCellSlice)> {
             match res {
                 Ok(value) => Ok(value),
                 Err(e) => Err(e.clone().into()),
@@ -380,9 +377,9 @@ impl LoopContImpl for DictMergeCont {
                 &mut self.result,
                 &mut key.as_data_slice(),
                 key.size_bits(),
-                &value.apply()?,
+                &value.apply(),
                 SetMode::Set,
-                &mut Cell::empty_context(),
+                Cell::empty_context(),
             )?;
         };
 
@@ -410,7 +407,7 @@ impl LoopContImpl for DictMergeCont {
                 key.size_bits(),
                 &value.as_full_slice(),
                 SetMode::Set,
-                &mut Cell::empty_context(),
+                Cell::empty_context(),
             )?;
         }
 
@@ -473,7 +470,7 @@ impl OwnedDictIter {
 }
 
 impl Iterator for OwnedDictIter {
-    type Item = Result<(CellBuilder, OwnedCellSlice), everscale_types::error::Error>;
+    type Item = Result<(CellDataBuilder, OwnedCellSlice), tycho_types::error::Error>;
 
     fn next(&mut self) -> Option<Self::Item> {
         Some(match self.inner.next_owned(&self.root)? {
@@ -483,7 +480,9 @@ impl Iterator for OwnedDictIter {
     }
 }
 
-fn clone_error(res: &<OwnedDictIter as Iterator>::Item) -> Result<&(CellBuilder, OwnedCellSlice)> {
+fn clone_error(
+    res: &<OwnedDictIter as Iterator>::Item,
+) -> Result<&(CellDataBuilder, OwnedCellSlice)> {
     match res {
         Ok(value) => Ok(value),
         Err(e) => Err(e.clone().into()),
@@ -507,25 +506,25 @@ fn pop_maybe_cell(stack: &mut Stack) -> Result<Option<Cell>> {
 
 fn pop_dict_key(stack: &mut Stack, key_mode: KeyMode, bits: u16) -> Result<OwnedCellSlice> {
     let signed = match key_mode {
-        KeyMode::Slice => return Ok(stack.pop_slice()?.as_ref().clone()),
+        KeyMode::Slice => return Ok(stack.pop_cell_slice()?.as_ref().clone()),
         KeyMode::Signed => true,
         KeyMode::Unsigned => false,
     };
 
     let mut builder = CellBuilder::new();
     let int = stack.pop_int()?;
-    store_int_to_builder(&mut builder, &int, bits, signed)?;
-    Ok(OwnedCellSlice::new(builder.build()?))
+    builder.store_bigint(&int, bits, signed)?;
+    Ok(OwnedCellSlice::new_allow_exotic(builder.build()?))
 }
 
-fn builder_to_int(builder: &CellBuilder, signed: bool) -> Result<BigInt> {
+fn builder_to_int(builder: &CellDataBuilder, signed: bool) -> Result<BigInt> {
     let bits = builder.size_bits();
     anyhow::ensure!(
         bits <= (256 + signed as u16),
         "Key does not fit into integer"
     );
 
-    let bytes = ((bits + 7) / 8) as usize;
+    let bytes = bits.div_ceil(8) as usize;
     let mut int = BigInt::from_signed_bytes_be(&builder.raw_data()[..bytes]);
 
     let rem = bits % 8;
