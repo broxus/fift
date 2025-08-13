@@ -10,42 +10,42 @@ use crate::core::DynFiftValue;
 use crate::util::*;
 
 pub trait DynFiftCont {
-    fn new_dyn_fift_cont<T: ContImpl + 'static>(cont: T) -> Cont;
+    fn new_dyn_fift_cont<T: FiftCont + 'static>(cont: T) -> RcFiftCont;
 }
 
-impl DynFiftCont for Cont {
+impl DynFiftCont for RcFiftCont {
     #[inline]
-    fn new_dyn_fift_cont<T: ContImpl + 'static>(cont: T) -> Cont {
-        let cont: Rc<dyn ContImpl> = Rc::new(cont);
-        Cont::from(cont)
+    fn new_dyn_fift_cont<T: FiftCont + 'static>(cont: T) -> RcFiftCont {
+        let cont: Rc<dyn FiftCont> = Rc::new(cont);
+        RcFiftCont::from(cont)
     }
 }
 
 pub trait IntoDynFiftCont {
-    fn into_dyn_fift_cont(self) -> Cont;
+    fn into_dyn_fift_cont(self) -> RcFiftCont;
 }
 
-impl<T: ContImpl> IntoDynFiftCont for Rc<T> {
+impl<T: FiftCont> IntoDynFiftCont for Rc<T> {
     #[inline]
-    fn into_dyn_fift_cont(self) -> Cont {
-        let this: Rc<dyn ContImpl> = self;
-        Cont::from(this)
+    fn into_dyn_fift_cont(self) -> RcFiftCont {
+        let this: Rc<dyn FiftCont> = self;
+        RcFiftCont::from(this)
     }
 }
 
-impl<T: ContImpl> IntoDynFiftCont for SafeRc<T> {
+impl<T: FiftCont> IntoDynFiftCont for SafeRc<T> {
     #[inline]
-    fn into_dyn_fift_cont(self) -> Cont {
+    fn into_dyn_fift_cont(self) -> RcFiftCont {
         Rc::<T>::into_dyn_fift_cont(SafeRc::into_inner(self))
     }
 }
 
-pub type Cont = SafeRc<dyn ContImpl>;
+pub type RcFiftCont = SafeRc<dyn FiftCont>;
 
-pub trait ContImpl: SafeDelete {
-    fn run(self: Rc<Self>, ctx: &mut Context) -> Result<Option<Cont>>;
+pub trait FiftCont: SafeDelete {
+    fn run(self: Rc<Self>, ctx: &mut Context) -> Result<Option<RcFiftCont>>;
 
-    fn up(&self) -> Option<&Cont> {
+    fn up(&self) -> Option<&RcFiftCont> {
         None
     }
 
@@ -56,11 +56,11 @@ pub trait ContImpl: SafeDelete {
     }
 }
 
-impl dyn ContImpl + '_ {
+impl dyn FiftCont + '_ {
     pub fn display_backtrace<'a>(&'a self, d: &'a Dictionary) -> impl std::fmt::Display + 'a {
         struct ContinuationBacktrace<'a> {
             d: &'a Dictionary,
-            cont: &'a dyn ContImpl,
+            cont: &'a dyn FiftCont,
         }
 
         impl std::fmt::Display for ContinuationBacktrace<'_> {
@@ -85,7 +85,7 @@ impl dyn ContImpl + '_ {
     pub fn display_name<'a>(&'a self, d: &'a Dictionary) -> impl std::fmt::Display + 'a {
         struct ContinuationWriteName<'a> {
             d: &'a Dictionary,
-            cont: &'a dyn ContImpl,
+            cont: &'a dyn FiftCont,
         }
 
         impl std::fmt::Display for ContinuationWriteName<'_> {
@@ -100,7 +100,7 @@ impl dyn ContImpl + '_ {
     pub fn display_dump<'a>(&'a self, d: &'a Dictionary) -> impl std::fmt::Display + 'a {
         struct ContinuationDump<'a> {
             d: &'a Dictionary,
-            cont: &'a dyn ContImpl,
+            cont: &'a dyn FiftCont,
         }
 
         impl std::fmt::Display for ContinuationDump<'_> {
@@ -115,10 +115,10 @@ impl dyn ContImpl + '_ {
 
 pub struct InterpreterCont;
 
-impl ContImpl for InterpreterCont {
-    fn run(self: Rc<Self>, ctx: &mut Context) -> Result<Option<Cont>> {
+impl FiftCont for InterpreterCont {
+    fn run(self: Rc<Self>, ctx: &mut Context) -> Result<Option<RcFiftCont>> {
         thread_local! {
-            static COMPILE_EXECUTE: Cont = SafeRc::new_dyn_fift_cont(CompileExecuteCont);
+            static COMPILE_EXECUTE: RcFiftCont = SafeRc::new_dyn_fift_cont(CompileExecuteCont);
             static WORD: RefCell<String> = RefCell::new(String::with_capacity(128));
         };
 
@@ -215,8 +215,8 @@ impl ContImpl for InterpreterCont {
 
 struct CompileExecuteCont;
 
-impl ContImpl for CompileExecuteCont {
-    fn run(self: Rc<Self>, ctx: &mut Context) -> Result<Option<Cont>> {
+impl FiftCont for CompileExecuteCont {
+    fn run(self: Rc<Self>, ctx: &mut Context) -> Result<Option<RcFiftCont>> {
         Ok(if ctx.state.is_compile() {
             ctx.compile_stack_top()?;
             None
@@ -232,12 +232,12 @@ impl ContImpl for CompileExecuteCont {
 
 pub struct ListCont {
     pub list: Rc<WordList>,
-    pub after: Option<Cont>,
+    pub after: Option<RcFiftCont>,
     pub pos: usize,
 }
 
-impl ContImpl for ListCont {
-    fn run(mut self: Rc<Self>, ctx: &mut Context) -> Result<Option<Cont>> {
+impl FiftCont for ListCont {
+    fn run(mut self: Rc<Self>, ctx: &mut Context) -> Result<Option<RcFiftCont>> {
         let is_last = self.pos + 1 >= self.list.items.len();
         let Some(current) = self.list.items.get(self.pos).cloned() else {
             return Ok(ctx.next.take());
@@ -255,7 +255,7 @@ impl ContImpl for ListCont {
             }
             None => {
                 if let Some(next) = ctx.next.take() {
-                    ctx.next = Some(Cont::new_dyn_fift_cont(ListCont {
+                    ctx.next = Some(RcFiftCont::new_dyn_fift_cont(ListCont {
                         after: SeqCont::make(self.after.clone(), Some(next)),
                         list: self.list.clone(),
                         pos: self.pos + 1,
@@ -263,7 +263,7 @@ impl ContImpl for ListCont {
                 } else if is_last {
                     ctx.next = self.after.clone()
                 } else {
-                    ctx.next = Some(Cont::new_dyn_fift_cont(ListCont {
+                    ctx.next = Some(RcFiftCont::new_dyn_fift_cont(ListCont {
                         after: self.after.clone(),
                         list: self.list.clone(),
                         pos: self.pos + 1,
@@ -275,7 +275,7 @@ impl ContImpl for ListCont {
         Ok(Some(current))
     }
 
-    fn up(&self) -> Option<&Cont> {
+    fn up(&self) -> Option<&RcFiftCont> {
         self.after.as_ref()
     }
 
@@ -322,14 +322,14 @@ pub struct NopCont;
 
 impl NopCont {
     thread_local! {
-        static INSTANCE: (Cont, SafeRc<dyn StackValue>) = {
-            let cont = Cont::new_dyn_fift_cont(NopCont);
+        static INSTANCE: (RcFiftCont, SafeRc<dyn StackValue>) = {
+            let cont = RcFiftCont::new_dyn_fift_cont(NopCont);
             let value: SafeRc<dyn StackValue> = SafeRc::new_dyn_fift_value(cont.clone());
             (cont, value)
         };
     }
 
-    pub fn instance() -> Cont {
+    pub fn instance() -> RcFiftCont {
         Self::INSTANCE.with(|(c, _)| c.clone())
     }
 
@@ -337,15 +337,15 @@ impl NopCont {
         Self::INSTANCE.with(|(_, v)| v.clone())
     }
 
-    pub fn is_nop(cont: &dyn ContImpl) -> bool {
+    pub fn is_nop(cont: &dyn FiftCont) -> bool {
         let left = Self::INSTANCE.with(|(c, _)| SafeRc::as_ptr(c) as *const ());
         let right = cont as *const _ as *const ();
         std::ptr::eq(left, right)
     }
 }
 
-impl ContImpl for NopCont {
-    fn run(self: Rc<Self>, _: &mut crate::Context) -> Result<Option<Cont>> {
+impl FiftCont for NopCont {
+    fn run(self: Rc<Self>, _: &mut crate::Context) -> Result<Option<RcFiftCont>> {
         Ok(None)
     }
 
@@ -355,16 +355,16 @@ impl ContImpl for NopCont {
 }
 
 pub struct SeqCont {
-    pub first: Option<Cont>,
-    pub second: Option<Cont>,
+    pub first: Option<RcFiftCont>,
+    pub second: Option<RcFiftCont>,
 }
 
 impl SeqCont {
-    pub fn make(first: Option<Cont>, second: Option<Cont>) -> Option<Cont> {
+    pub fn make(first: Option<RcFiftCont>, second: Option<RcFiftCont>) -> Option<RcFiftCont> {
         if second.is_none() {
             first
         } else if let Some(first) = first {
-            Some(Cont::new_dyn_fift_cont(Self {
+            Some(RcFiftCont::new_dyn_fift_cont(Self {
                 first: Some(first),
                 second,
             }))
@@ -374,8 +374,8 @@ impl SeqCont {
     }
 }
 
-impl ContImpl for SeqCont {
-    fn run(mut self: Rc<Self>, ctx: &mut Context) -> Result<Option<Cont>> {
+impl FiftCont for SeqCont {
+    fn run(mut self: Rc<Self>, ctx: &mut Context) -> Result<Option<RcFiftCont>> {
         Ok(match Rc::get_mut(&mut self) {
             Some(this) => {
                 if ctx.next.is_none() {
@@ -395,7 +395,7 @@ impl ContImpl for SeqCont {
         })
     }
 
-    fn up(&self) -> Option<&Cont> {
+    fn up(&self) -> Option<&RcFiftCont> {
         self.second.as_ref()
     }
 
@@ -416,13 +416,13 @@ impl ContImpl for SeqCont {
 }
 
 pub struct TimesCont {
-    pub body: Option<Cont>,
-    pub after: Option<Cont>,
+    pub body: Option<RcFiftCont>,
+    pub after: Option<RcFiftCont>,
     pub count: usize,
 }
 
-impl ContImpl for TimesCont {
-    fn run(mut self: Rc<Self>, ctx: &mut Context) -> Result<Option<Cont>> {
+impl FiftCont for TimesCont {
+    fn run(mut self: Rc<Self>, ctx: &mut Context) -> Result<Option<RcFiftCont>> {
         Ok(match Rc::get_mut(&mut self) {
             Some(this) => {
                 ctx.insert_before_next(&mut this.after);
@@ -441,7 +441,7 @@ impl ContImpl for TimesCont {
                 let next = SeqCont::make(self.after.clone(), ctx.next.take());
 
                 ctx.next = if self.count > 1 {
-                    Some(Cont::new_dyn_fift_cont(Self {
+                    Some(RcFiftCont::new_dyn_fift_cont(Self {
                         body: self.body.clone(),
                         after: next,
                         count: self.count - 1,
@@ -455,7 +455,7 @@ impl ContImpl for TimesCont {
         })
     }
 
-    fn up(&self) -> Option<&Cont> {
+    fn up(&self) -> Option<&RcFiftCont> {
         self.after.as_ref()
     }
 
@@ -466,19 +466,19 @@ impl ContImpl for TimesCont {
     fn fmt_dump(&self, d: &Dictionary, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "<repeat {} times:> ", self.count)?;
         if let Some(body) = &self.body {
-            ContImpl::fmt_dump(body.as_ref(), d, f)?;
+            FiftCont::fmt_dump(body.as_ref(), d, f)?;
         }
         Ok(())
     }
 }
 
 pub struct UntilCont {
-    pub body: Option<Cont>,
-    pub after: Option<Cont>,
+    pub body: Option<RcFiftCont>,
+    pub after: Option<RcFiftCont>,
 }
 
-impl ContImpl for UntilCont {
-    fn run(mut self: Rc<Self>, ctx: &mut Context) -> Result<Option<Cont>> {
+impl FiftCont for UntilCont {
+    fn run(mut self: Rc<Self>, ctx: &mut Context) -> Result<Option<RcFiftCont>> {
         if ctx.stack.pop_bool()? {
             return Ok(match Rc::get_mut(&mut self) {
                 Some(this) => this.after.take(),
@@ -507,7 +507,7 @@ impl ContImpl for UntilCont {
         Ok(body)
     }
 
-    fn up(&self) -> Option<&Cont> {
+    fn up(&self) -> Option<&RcFiftCont> {
         self.after.as_ref()
     }
 
@@ -518,16 +518,16 @@ impl ContImpl for UntilCont {
     fn fmt_dump(&self, d: &Dictionary, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str("<until loop continuation:> ")?;
         if let Some(body) = &self.body {
-            ContImpl::fmt_dump(body.as_ref(), d, f)?;
+            FiftCont::fmt_dump(body.as_ref(), d, f)?;
         }
         Ok(())
     }
 }
 
 pub struct WhileCont {
-    pub condition: Option<Cont>,
-    pub body: Option<Cont>,
-    pub after: Option<Cont>,
+    pub condition: Option<RcFiftCont>,
+    pub body: Option<RcFiftCont>,
+    pub after: Option<RcFiftCont>,
     pub running_body: bool,
 }
 
@@ -541,8 +541,8 @@ impl WhileCont {
     }
 }
 
-impl ContImpl for WhileCont {
-    fn run(mut self: Rc<Self>, ctx: &mut Context) -> Result<Option<Cont>> {
+impl FiftCont for WhileCont {
+    fn run(mut self: Rc<Self>, ctx: &mut Context) -> Result<Option<RcFiftCont>> {
         let cont = if self.running_body {
             if !ctx.stack.pop_bool()? {
                 return Ok(match Rc::get_mut(&mut self) {
@@ -574,7 +574,7 @@ impl ContImpl for WhileCont {
         Ok(cont)
     }
 
-    fn up(&self) -> Option<&Cont> {
+    fn up(&self) -> Option<&RcFiftCont> {
         self.after.as_ref()
     }
 
@@ -590,7 +590,7 @@ impl ContImpl for WhileCont {
             self.condition.as_ref()
         };
         if let Some(stage) = stage {
-            ContImpl::fmt_dump(stage.as_ref(), d, f)?;
+            FiftCont::fmt_dump(stage.as_ref(), d, f)?;
         }
         Ok(())
     }
@@ -599,12 +599,12 @@ impl ContImpl for WhileCont {
 pub struct LoopCont<T> {
     inner: T,
     state: LoopContState,
-    func: Cont,
-    after: Option<Cont>,
+    func: RcFiftCont,
+    after: Option<RcFiftCont>,
 }
 
 impl<T> LoopCont<T> {
-    pub fn new(inner: T, func: Cont, after: Option<Cont>) -> Self {
+    pub fn new(inner: T, func: RcFiftCont, after: Option<RcFiftCont>) -> Self {
         Self {
             inner,
             state: LoopContState::Init,
@@ -614,8 +614,8 @@ impl<T> LoopCont<T> {
     }
 }
 
-impl<T: LoopContImpl + 'static> ContImpl for LoopCont<T> {
-    fn run(mut self: Rc<Self>, ctx: &mut Context) -> Result<Option<Cont>> {
+impl<T: LoopContImpl + 'static> FiftCont for LoopCont<T> {
+    fn run(mut self: Rc<Self>, ctx: &mut Context) -> Result<Option<RcFiftCont>> {
         let Some(this) = Rc::get_mut(&mut self) else {
             return Ok(Some(SafeRc::new_dyn_fift_cont(Self {
                 inner: self.inner.clone(),
@@ -706,8 +706,8 @@ where
     }
 }
 
-impl ContImpl for IntLitCont {
-    fn run(self: Rc<Self>, ctx: &mut Context) -> Result<Option<Cont>> {
+impl FiftCont for IntLitCont {
+    fn run(self: Rc<Self>, ctx: &mut Context) -> Result<Option<RcFiftCont>> {
         let value = match Rc::try_unwrap(self) {
             Ok(value) => value.0,
             Err(this) => this.0.clone(),
@@ -723,8 +723,8 @@ impl ContImpl for IntLitCont {
 
 pub struct LitCont(pub SafeRc<dyn StackValue>);
 
-impl ContImpl for LitCont {
-    fn run(self: Rc<Self>, ctx: &mut Context) -> Result<Option<Cont>> {
+impl FiftCont for LitCont {
+    fn run(self: Rc<Self>, ctx: &mut Context) -> Result<Option<RcFiftCont>> {
         let value = match Rc::try_unwrap(self) {
             Ok(value) => value.0,
             Err(this) => this.0.clone(),
@@ -740,8 +740,8 @@ impl ContImpl for LitCont {
 
 pub struct MultiLitCont(pub Vec<SafeRc<dyn StackValue>>);
 
-impl ContImpl for MultiLitCont {
-    fn run(self: Rc<Self>, ctx: &mut Context) -> Result<Option<Cont>> {
+impl FiftCont for MultiLitCont {
+    fn run(self: Rc<Self>, ctx: &mut Context) -> Result<Option<RcFiftCont>> {
         match Rc::try_unwrap(self) {
             Ok(value) => {
                 for item in value.0 {
@@ -771,8 +771,8 @@ impl ContImpl for MultiLitCont {
 
 pub type ContextWordFunc = fn(&mut Context) -> Result<()>;
 
-impl ContImpl for ContextWordFunc {
-    fn run(self: Rc<Self>, ctx: &mut Context) -> Result<Option<Cont>> {
+impl FiftCont for ContextWordFunc {
+    fn run(self: Rc<Self>, ctx: &mut Context) -> Result<Option<RcFiftCont>> {
         (self)(ctx)?;
         Ok(None)
     }
@@ -782,10 +782,10 @@ impl ContImpl for ContextWordFunc {
     }
 }
 
-pub type ContextTailWordFunc = fn(&mut Context) -> Result<Option<Cont>>;
+pub type ContextTailWordFunc = fn(&mut Context) -> Result<Option<RcFiftCont>>;
 
-impl ContImpl for ContextTailWordFunc {
-    fn run(self: Rc<Self>, ctx: &mut Context) -> Result<Option<Cont>> {
+impl FiftCont for ContextTailWordFunc {
+    fn run(self: Rc<Self>, ctx: &mut Context) -> Result<Option<RcFiftCont>> {
         (self)(ctx)
     }
 
@@ -796,8 +796,8 @@ impl ContImpl for ContextTailWordFunc {
 
 pub type StackWordFunc = fn(&mut Stack) -> Result<()>;
 
-impl ContImpl for StackWordFunc {
-    fn run(self: Rc<Self>, ctx: &mut Context) -> Result<Option<Cont>> {
+impl FiftCont for StackWordFunc {
+    fn run(self: Rc<Self>, ctx: &mut Context) -> Result<Option<RcFiftCont>> {
         (self)(&mut ctx.stack)?;
         Ok(None)
     }
@@ -810,10 +810,10 @@ impl ContImpl for StackWordFunc {
 // === impl Context ===
 
 impl Context<'_> {
-    fn insert_before_next(&mut self, cont: &mut Option<Cont>) {
+    fn insert_before_next(&mut self, cont: &mut Option<RcFiftCont>) {
         if let Some(next) = self.next.take() {
             *cont = match cont.take() {
-                Some(prev) => Some(Cont::new_dyn_fift_cont(SeqCont {
+                Some(prev) => Some(RcFiftCont::new_dyn_fift_cont(SeqCont {
                     first: Some(prev),
                     second: Some(next),
                 })),
@@ -844,13 +844,13 @@ fn write_lit_cont_name(
 }
 
 fn write_cont_name(
-    cont: &dyn ContImpl,
+    cont: &dyn FiftCont,
     d: &Dictionary,
     f: &mut std::fmt::Formatter<'_>,
 ) -> std::fmt::Result {
     if let Some(name) = d.resolve_name(cont) {
         f.write_str(name.trim_end())
     } else {
-        write!(f, "<continuation {:?}>", cont as *const dyn ContImpl)
+        write!(f, "<continuation {:?}>", cont as *const dyn FiftCont)
     }
 }

@@ -159,10 +159,10 @@ impl StackUtils {
 
         match (x, y) {
             (0, 0) => stack.push(cont::NopCont::instance()),
-            (0, 1) => stack.push(Cont::new_dyn_fift_cont(
+            (0, 1) => stack.push(RcFiftCont::new_dyn_fift_cont(
                 interpret_swap as cont::StackWordFunc,
             )),
-            _ => stack.push(Cont::new_dyn_fift_cont(XchgCont { x, y })),
+            _ => stack.push(RcFiftCont::new_dyn_fift_cont(XchgCont { x, y })),
         }
     }
 
@@ -170,13 +170,13 @@ impl StackUtils {
     fn interpret_make_push(stack: &mut Stack) -> Result<()> {
         let x = stack.pop_smallint_range(0, 255)?;
         match x {
-            0 => stack.push(Cont::new_dyn_fift_cont(
+            0 => stack.push(RcFiftCont::new_dyn_fift_cont(
                 interpret_dup as cont::StackWordFunc,
             )),
-            1 => stack.push(Cont::new_dyn_fift_cont(
+            1 => stack.push(RcFiftCont::new_dyn_fift_cont(
                 interpret_over as cont::StackWordFunc,
             )),
-            _ => stack.push(Cont::new_dyn_fift_cont(PushCont(x))),
+            _ => stack.push(RcFiftCont::new_dyn_fift_cont(PushCont(x))),
         }
     }
 
@@ -184,13 +184,13 @@ impl StackUtils {
     fn interpret_make_pop(stack: &mut Stack) -> Result<()> {
         let x = stack.pop_smallint_range(0, 255)?;
         match x {
-            0 => stack.push(Cont::new_dyn_fift_cont(
+            0 => stack.push(RcFiftCont::new_dyn_fift_cont(
                 interpret_drop as cont::StackWordFunc,
             )),
-            1 => stack.push(Cont::new_dyn_fift_cont(
+            1 => stack.push(RcFiftCont::new_dyn_fift_cont(
                 interpret_nip as cont::StackWordFunc,
             )),
-            _ => stack.push(Cont::new_dyn_fift_cont(PopCont(x))),
+            _ => stack.push(RcFiftCont::new_dyn_fift_cont(PopCont(x))),
         }
     }
 }
@@ -200,8 +200,8 @@ struct XchgCont {
     y: u32,
 }
 
-impl cont::ContImpl for XchgCont {
-    fn run(self: Rc<Self>, ctx: &mut Context) -> Result<Option<Cont>> {
+impl cont::FiftCont for XchgCont {
+    fn run(self: Rc<Self>, ctx: &mut Context) -> Result<Option<RcFiftCont>> {
         ctx.stack.swap(self.x as usize, self.y as usize)?;
         Ok(None)
     }
@@ -213,8 +213,8 @@ impl cont::ContImpl for XchgCont {
 
 struct PushCont(u32);
 
-impl cont::ContImpl for PushCont {
-    fn run(self: Rc<Self>, ctx: &mut Context) -> Result<Option<Cont>> {
+impl cont::FiftCont for PushCont {
+    fn run(self: Rc<Self>, ctx: &mut Context) -> Result<Option<RcFiftCont>> {
         let item = ctx.stack.fetch(self.0 as usize)?;
         ctx.stack.push_raw(item)?;
         Ok(None)
@@ -227,8 +227,8 @@ impl cont::ContImpl for PushCont {
 
 struct PopCont(u32);
 
-impl cont::ContImpl for PopCont {
-    fn run(self: Rc<Self>, ctx: &mut Context) -> Result<Option<Cont>> {
+impl cont::FiftCont for PopCont {
+    fn run(self: Rc<Self>, ctx: &mut Context) -> Result<Option<RcFiftCont>> {
         ctx.stack.swap(0, self.0 as usize)?;
         ctx.stack.pop()?;
         Ok(None)

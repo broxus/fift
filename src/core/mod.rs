@@ -5,7 +5,7 @@ use anyhow::{Context as _, Result};
 pub use fift_proc::fift_module;
 use tycho_vm::SafeRc;
 
-pub use self::cont::{Cont, ContImpl, DynFiftCont, IntoDynFiftCont};
+pub use self::cont::{RcFiftCont, FiftCont, DynFiftCont, IntoDynFiftCont};
 pub use self::dictionary::{Dictionaries, Dictionary, DictionaryEntry};
 pub use self::env::{Environment, SourceBlock};
 pub use self::lexer::Lexer;
@@ -24,7 +24,7 @@ pub struct Context<'a> {
     pub state: State,
     pub stack: Stack,
     pub exit_code: u8,
-    pub next: Option<Cont>,
+    pub next: Option<RcFiftCont>,
     pub dicts: Dictionaries,
 
     pub limits: ExecutionLimits,
@@ -83,7 +83,7 @@ impl<'a> Context<'a> {
 
     pub fn run(&mut self) -> Result<u8> {
         self.stats = Default::default();
-        let mut current = Some(Cont::new_dyn_fift_cont(cont::InterpreterCont));
+        let mut current = Some(RcFiftCont::new_dyn_fift_cont(cont::InterpreterCont));
         while let Some(cont) = current.take() {
             self.stats.inc_step(&self.limits)?;
             current = SafeRc::into_inner(cont).run(self)?;
@@ -95,7 +95,7 @@ impl<'a> Context<'a> {
         Ok(self.exit_code)
     }
 
-    pub(crate) fn execute_stack_top(&mut self) -> Result<Cont> {
+    pub(crate) fn execute_stack_top(&mut self) -> Result<RcFiftCont> {
         let cont = self.stack.pop_cont()?;
         let count = self.stack.pop_smallint_range(0, 255)? as usize;
         self.stack.check_underflow(count)?;
@@ -108,14 +108,14 @@ impl<'a> Context<'a> {
 
         let cont = match count {
             0 => None,
-            1 => Some(Cont::new_dyn_fift_cont(cont::LitCont(self.stack.pop()?))),
+            1 => Some(RcFiftCont::new_dyn_fift_cont(cont::LitCont(self.stack.pop()?))),
             _ => {
                 let mut literals = Vec::with_capacity(count);
                 for _ in 0..count {
                     literals.push(self.stack.pop()?);
                 }
                 literals.reverse();
-                Some(Cont::new_dyn_fift_cont(cont::MultiLitCont(literals)))
+                Some(RcFiftCont::new_dyn_fift_cont(cont::MultiLitCont(literals)))
             }
         };
 

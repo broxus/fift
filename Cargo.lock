@@ -204,8 +204,18 @@ version = "0.20.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fc7f46116c46ff9ab3eb1597a45688b6715c6e628b5c133e288e709a29bcb4ee"
 dependencies = [
- "darling_core",
- "darling_macro",
+ "darling_core 0.20.11",
+ "darling_macro 0.20.11",
+]
+
+[[package]]
+name = "darling"
+version = "0.21.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d6b136475da5ef7b6ac596c0e956e37bad51b85b987ff3d5e230e964936736b2"
+dependencies = [
+ "darling_core 0.21.1",
+ "darling_macro 0.21.1",
 ]
 
 [[package]]
@@ -223,12 +233,37 @@ dependencies = [
 ]
 
 [[package]]
+name = "darling_core"
+version = "0.21.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b44ad32f92b75fb438b04b68547e521a548be8acc339a6dacc4a7121488f53e6"
+dependencies = [
+ "fnv",
+ "ident_case",
+ "proc-macro2",
+ "quote",
+ "strsim",
+ "syn",
+]
+
+[[package]]
 name = "darling_macro"
 version = "0.20.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fc34b93ccb385b40dc71c6fceac4b2ad23662c7eeb248cf10d529b7e055b6ead"
 dependencies = [
- "darling_core",
+ "darling_core 0.20.11",
+ "quote",
+ "syn",
+]
+
+[[package]]
+name = "darling_macro"
+version = "0.21.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2b5be8a7a562d315a5b92a630c30cec6bcf663e6673f00fbb69cca66a6f521b9"
+dependencies = [
+ "darling_core 0.21.1",
  "quote",
  "syn",
 ]
@@ -314,7 +349,7 @@ version = "0.1.23"
 name = "fift-proc"
 version = "0.1.15"
 dependencies = [
- "darling",
+ "darling 0.20.11",
  "quote",
  "syn",
 ]
@@ -762,8 +797,7 @@ dependencies = [
 [[package]]
 name = "tycho-vm"
 version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "00d0a2334ef0fef1c75f1330922c81cc4a95b0a9f2c8add179e653a930ebd52b"
+source = "git+https://github.com/broxus/tycho-vm.git?rev=6ca73cbce33b54c96a4ad93227b2a91a810866f7#6ca73cbce33b54c96a4ad93227b2a91a810866f7"
 dependencies = [
  "ahash",
  "anyhow",
@@ -784,10 +818,9 @@ dependencies = [
 [[package]]
 name = "tycho-vm-proc"
 version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "21c820f439a12251e8a5aa15f49f4fd18c73edb6694546dfce4c0aa250fbd71a"
+source = "git+https://github.com/broxus/tycho-vm.git?rev=6ca73cbce33b54c96a4ad93227b2a91a810866f7#6ca73cbce33b54c96a4ad93227b2a91a810866f7"
 dependencies = [
- "darling",
+ "darling 0.21.1",
  "proc-macro2",
  "quote",
  "syn",

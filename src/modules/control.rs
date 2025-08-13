@@ -32,13 +32,13 @@ impl Control {
     // === Execution control ===
 
     #[cmd(name = "execute", tail)]
-    fn interpret_execute(ctx: &mut Context) -> Result<Option<Cont>> {
+    fn interpret_execute(ctx: &mut Context) -> Result<Option<RcFiftCont>> {
         let cont = ctx.stack.pop_cont()?;
         Ok(Some(cont.as_ref().clone()))
     }
 
     #[cmd(name = "call/cc", tail)]
-    fn interpret_call_cc(ctx: &mut Context) -> Result<Option<Cont>> {
+    fn interpret_call_cc(ctx: &mut Context) -> Result<Option<RcFiftCont>> {
         let next = ctx.stack.pop_cont()?;
         if let Some(next) = ctx.next.take() {
             ctx.stack.push(next)?;
@@ -49,7 +49,7 @@ impl Control {
     }
 
     #[cmd(name = "times", tail)]
-    fn interpret_execute_times(ctx: &mut Context) -> Result<Option<Cont>> {
+    fn interpret_execute_times(ctx: &mut Context) -> Result<Option<RcFiftCont>> {
         let count = ctx.stack.pop_smallint_range(0, 1000000000)? as usize;
         let body = ctx.stack.pop_cont_owned()?;
         Ok(match count {
@@ -67,7 +67,7 @@ impl Control {
     }
 
     #[cmd(name = "if", tail)]
-    fn interpret_if(ctx: &mut Context) -> Result<Option<Cont>> {
+    fn interpret_if(ctx: &mut Context) -> Result<Option<RcFiftCont>> {
         let true_ref = ctx.stack.pop_cont()?;
         Ok(if ctx.stack.pop_bool()? {
             Some(true_ref.as_ref().clone())
@@ -77,7 +77,7 @@ impl Control {
     }
 
     #[cmd(name = "ifnot", tail)]
-    fn interpret_ifnot(ctx: &mut Context) -> Result<Option<Cont>> {
+    fn interpret_ifnot(ctx: &mut Context) -> Result<Option<RcFiftCont>> {
         let false_ref = ctx.stack.pop_cont()?;
         Ok(if ctx.stack.pop_bool()? {
             None
@@ -87,7 +87,7 @@ impl Control {
     }
 
     #[cmd(name = "cond", tail)]
-    fn interpret_cond(ctx: &mut Context) -> Result<Option<Cont>> {
+    fn interpret_cond(ctx: &mut Context) -> Result<Option<RcFiftCont>> {
         let false_ref = ctx.stack.pop_cont()?;
         let true_ref = ctx.stack.pop_cont()?;
         Ok(Some(if ctx.stack.pop_bool()? {
@@ -98,10 +98,10 @@ impl Control {
     }
 
     #[cmd(name = "while", tail)]
-    fn interpret_while(ctx: &mut Context) -> Result<Option<Cont>> {
+    fn interpret_while(ctx: &mut Context) -> Result<Option<RcFiftCont>> {
         let body = ctx.stack.pop_cont_owned()?;
         let cond = ctx.stack.pop_cont_owned()?;
-        ctx.next = Some(Cont::new_dyn_fift_cont(cont::WhileCont {
+        ctx.next = Some(RcFiftCont::new_dyn_fift_cont(cont::WhileCont {
             condition: Some(cond.clone()),
             body: Some(body),
             after: ctx.next.take(),
@@ -111,7 +111,7 @@ impl Control {
     }
 
     #[cmd(name = "until", tail)]
-    fn interpret_until(ctx: &mut Context) -> Result<Option<Cont>> {
+    fn interpret_until(ctx: &mut Context) -> Result<Option<RcFiftCont>> {
         let body = ctx.stack.pop_cont_owned()?;
         ctx.next = Some(SafeRc::new_dyn_fift_cont(cont::UntilCont {
             body: Some(body.clone()),
@@ -165,13 +165,13 @@ impl Control {
     }
 
     #[cmd(name = "(execute)", tail)]
-    fn interpret_execute_internal(ctx: &mut Context) -> Result<Option<Cont>> {
+    fn interpret_execute_internal(ctx: &mut Context) -> Result<Option<RcFiftCont>> {
         let cont = ctx.execute_stack_top()?;
         Ok(Some(cont))
     }
 
     #[cmd(name = "(interpret-prepare)", tail)]
-    fn interpret_prepare(ctx: &mut Context) -> Result<Option<Cont>> {
+    fn interpret_prepare(ctx: &mut Context) -> Result<Option<RcFiftCont>> {
         let found = ctx.stack.pop_smallint_signed_range(-1, 1)?;
         Ok(if found == 0 {
             // Interpret number
@@ -320,7 +320,7 @@ impl Control {
     #[cmd(name = "::_", active, args(active = true, prefix = true))]
     fn interpret_colon(ctx: &mut Context, active: bool, prefix: bool) -> Result<()> {
         thread_local! {
-            static CREATE_AUX: Cont = Cont::new_dyn_fift_cont(
+            static CREATE_AUX: RcFiftCont = RcFiftCont::new_dyn_fift_cont(
                 (|ctx| interpret_create_aux(ctx, None)) as cont::ContextWordFunc
             );
         };
@@ -439,7 +439,7 @@ impl Control {
     }
 
     #[cmd(name = "include", tail)]
-    fn interpret_include(ctx: &mut Context) -> Result<Option<Cont>> {
+    fn interpret_include(ctx: &mut Context) -> Result<Option<RcFiftCont>> {
         let name = ctx.stack.pop_string()?;
         let source_block = ctx.env.include(&name)?;
         ctx.input.push_source_block(source_block);
@@ -452,14 +452,14 @@ impl Control {
         }
 
         ctx.next = cont::SeqCont::make(
-            Some(Cont::new_dyn_fift_cont(ExitSourceBlockCont)),
+            Some(RcFiftCont::new_dyn_fift_cont(ExitSourceBlockCont)),
             ctx.next.take(),
         );
-        Ok(Some(Cont::new_dyn_fift_cont(cont::InterpreterCont)))
+        Ok(Some(RcFiftCont::new_dyn_fift_cont(cont::InterpreterCont)))
     }
 
     #[cmd(name = "skip-to-eof", tail)]
-    fn interpret_skip_source(ctx: &mut Context) -> Result<Option<Cont>> {
+    fn interpret_skip_source(ctx: &mut Context) -> Result<Option<RcFiftCont>> {
         let cont = ctx.exit_interpret.fetch();
         ctx.next = None;
         Ok(if !cont.is_null() {
@@ -498,7 +498,7 @@ impl Control {
     }
 }
 
-fn define_word(d: &mut Dictionary, mut word: String, cont: Cont, mode: DefMode) -> Result<()> {
+fn define_word(d: &mut Dictionary, mut word: String, cont: RcFiftCont, mode: DefMode) -> Result<()> {
     anyhow::ensure!(!word.is_empty(), "Word definition is empty");
     if !mode.prefix {
         word.push(' ');
@@ -517,8 +517,8 @@ struct DefMode {
 
 struct ResetContextCont(SafeRc<SharedBox>);
 
-impl cont::ContImpl for ResetContextCont {
-    fn run(self: Rc<Self>, ctx: &mut Context) -> Result<Option<Cont>> {
+impl cont::FiftCont for ResetContextCont {
+    fn run(self: Rc<Self>, ctx: &mut Context) -> Result<Option<RcFiftCont>> {
         ctx.dicts.context.set_words_box(self.0.clone());
         Ok(None)
     }
@@ -530,8 +530,8 @@ impl cont::ContImpl for ResetContextCont {
 
 struct ExitInterpretCont;
 
-impl cont::ContImpl for ExitInterpretCont {
-    fn run(self: Rc<Self>, ctx: &mut Context) -> Result<Option<Cont>> {
+impl cont::FiftCont for ExitInterpretCont {
+    fn run(self: Rc<Self>, ctx: &mut Context) -> Result<Option<RcFiftCont>> {
         ctx.stack.push(ctx.exit_interpret.clone())?;
         Ok(None)
     }
@@ -543,8 +543,8 @@ impl cont::ContImpl for ExitInterpretCont {
 
 struct ExitSourceBlockCont;
 
-impl cont::ContImpl for ExitSourceBlockCont {
-    fn run(self: Rc<Self>, ctx: &mut Context) -> Result<Option<Cont>> {
+impl cont::FiftCont for ExitSourceBlockCont {
+    fn run(self: Rc<Self>, ctx: &mut Context) -> Result<Option<RcFiftCont>> {
         ctx.input.pop_source_block();
         Ok(None)
     }

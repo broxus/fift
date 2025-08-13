@@ -1,7 +1,7 @@
 use anyhow::Result;
 use tycho_vm::SafeRc;
 
-use super::cont::{Cont, ContImpl, ContextTailWordFunc, ContextWordFunc, StackWordFunc};
+use super::cont::{RcFiftCont, FiftCont, ContextTailWordFunc, ContextWordFunc, StackWordFunc};
 use super::stack::{
     DynFiftValue, HashMapTreeKey, HashMapTreeKeyRef, HashMapTreeNode, SharedBox, StackValue,
     StackValueType,
@@ -95,7 +95,7 @@ impl Dictionary {
         Ok(DictionaryEntry::try_from_value(node.value.as_ref()))
     }
 
-    pub fn resolve_name(&self, definition: &dyn ContImpl) -> Option<SafeRc<String>> {
+    pub fn resolve_name(&self, definition: &dyn FiftCont) -> Option<SafeRc<String>> {
         let map = self.words.borrow();
         if let Ok(map) = map.as_hashmap() {
             for entry in map {
@@ -180,7 +180,7 @@ impl Dictionary {
 }
 
 pub struct DictionaryEntry {
-    pub definition: Cont,
+    pub definition: RcFiftCont,
     pub active: bool,
 }
 
@@ -193,7 +193,7 @@ impl DictionaryEntry {
         })
     }
 
-    fn cont_from_value(value: &dyn StackValue) -> Option<(&Cont, bool)> {
+    fn cont_from_value(value: &dyn StackValue) -> Option<(&RcFiftCont, bool)> {
         if let Ok(cont) = value.as_cont() {
             return Some((cont, false));
         } else if let Ok(tuple) = value.as_tuple()
@@ -206,8 +206,8 @@ impl DictionaryEntry {
     }
 }
 
-impl From<Cont> for DictionaryEntry {
-    fn from(value: Cont) -> Self {
+impl From<RcFiftCont> for DictionaryEntry {
+    fn from(value: RcFiftCont) -> Self {
         Self {
             definition: value,
             active: false,
@@ -215,7 +215,7 @@ impl From<Cont> for DictionaryEntry {
     }
 }
 
-impl<T: ContImpl + 'static> From<SafeRc<T>> for DictionaryEntry {
+impl<T: FiftCont + 'static> From<SafeRc<T>> for DictionaryEntry {
     fn from(value: SafeRc<T>) -> Self {
         Self {
             definition: value.into_dyn_fift_cont(),

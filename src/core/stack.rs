@@ -258,11 +258,11 @@ impl Stack {
         self.pop()?.into_cell_slice()
     }
 
-    pub fn pop_cont(&mut self) -> Result<SafeRc<Cont>> {
+    pub fn pop_cont(&mut self) -> Result<SafeRc<RcFiftCont>> {
         self.pop()?.into_cont()
     }
 
-    pub fn pop_cont_owned(&mut self) -> Result<Cont> {
+    pub fn pop_cont_owned(&mut self) -> Result<RcFiftCont> {
         Ok(match SafeRc::try_unwrap(self.pop()?.into_cont()?) {
             Ok(inner) => inner,
             Err(rc) => rc.as_ref().clone(),
@@ -490,10 +490,10 @@ define_stack_value! {
             as_tuple(v): &StackTuple = Ok(v),
             rc_into_tuple,
         },
-        Cont(Cont) = {
+        Cont(RcFiftCont) = {
             eq(a, b) = SafeRc::ptr_eq(a, b),
             fmt_dump(v, f) = write!(f, "Cont{{{:?}}}", SafeRc::as_ptr(v) as *const ()),
-            as_cont(v): &Cont = Ok(v),
+            as_cont(v): &RcFiftCont = Ok(v),
             rc_into_cont,
         },
         WordList(WordList) = {
@@ -502,7 +502,7 @@ define_stack_value! {
             as_word_list(v): &WordList = Ok(v),
             rc_into_word_list,
             {
-                fn rc_into_cont(self: Rc<Self>) -> Result<Rc<Cont>> {
+                fn rc_into_cont(self: Rc<Self>) -> Result<Rc<RcFiftCont>> {
                     Ok(Rc::new(self.finish()))
                 }
             }
@@ -524,7 +524,13 @@ define_stack_value! {
             fmt_dump(v, f) = write!(f, "HashMap{{{:?}}}", &v as *const _),
             as_hashmap(v): &HashMapTreeNode = Ok(v),
             rc_into_hashmap,
-        }
+        },
+        VmCont(tycho_vm::RcCont) = {
+            eq(a, b) = SafeRc::ptr_eq(a, b),
+            fmt_dump(v, f) = write!(f, "VmCont{{{:?}}}", SafeRc::as_ptr(v) as *const ()),
+            as_vm_cont(v): &tycho_vm::RcCont = Ok(v),
+            rc_into_vm_cont,
+        },
     }
 }
 
@@ -630,12 +636,13 @@ pub trait DynFiftValue {
     fn into_cell(self) -> Result<SafeRc<Cell>>;
     fn into_builder(self) -> Result<SafeRc<CellBuilder>>;
     fn into_cell_slice(self) -> Result<SafeRc<OwnedCellSlice>>;
-    fn into_cont(self) -> Result<SafeRc<Cont>>;
+    fn into_cont(self) -> Result<SafeRc<RcFiftCont>>;
     fn into_word_list(self) -> Result<SafeRc<WordList>>;
     fn into_tuple(self) -> Result<SafeRc<StackTuple>>;
     fn into_shared_box(self) -> Result<SafeRc<SharedBox>>;
     fn into_atom(self) -> Result<SafeRc<Atom>>;
     fn into_hashmap(self) -> Result<SafeRc<HashMapTreeNode>>;
+    fn into_vm_cont(self) -> Result<SafeRc<tycho_vm::RcCont>>;
 }
 
 impl DynFiftValue for SafeRc<dyn StackValue> {
@@ -672,7 +679,7 @@ impl DynFiftValue for SafeRc<dyn StackValue> {
             .map(SafeRc::from)
     }
 
-    fn into_cont(self) -> Result<SafeRc<Cont>> {
+    fn into_cont(self) -> Result<SafeRc<RcFiftCont>> {
         Self::into_inner(self).rc_into_cont().map(SafeRc::from)
     }
 
@@ -696,6 +703,10 @@ impl DynFiftValue for SafeRc<dyn StackValue> {
 
     fn into_hashmap(self) -> Result<SafeRc<HashMapTreeNode>> {
         Self::into_inner(self).rc_into_hashmap().map(SafeRc::from)
+    }
+
+    fn into_vm_cont(self) -> Result<SafeRc<tycho_vm::RcCont>> {
+        Self::into_inner(self).rc_into_vm_cont().map(SafeRc::from)
     }
 }
 
@@ -722,7 +733,7 @@ pub type StackTuple = Vec<SafeRc<dyn StackValue>>;
 
 #[derive(Default, Clone)]
 pub struct WordList {
-    pub items: Vec<Cont>,
+    pub items: Vec<RcFiftCont>,
 }
 
 impl SafeRcMakeMut for WordList {
@@ -733,12 +744,12 @@ impl SafeRcMakeMut for WordList {
 }
 
 impl WordList {
-    pub fn finish(self: Rc<Self>) -> Cont {
+    pub fn finish(self: Rc<Self>) -> RcFiftCont {
         if self.items.len() == 1 {
             return self.items.first().unwrap().clone();
         }
 
-        Cont::new_dyn_fift_cont(ListCont {
+        RcFiftCont::new_dyn_fift_cont(ListCont {
             after: None,
             list: self,
             pos: 0,

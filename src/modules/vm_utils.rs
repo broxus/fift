@@ -2,7 +2,7 @@ use std::fmt::Write;
 
 use anyhow::Result;
 use tycho_types::prelude::*;
-use tycho_vm::{codepage0, DumpOutput, DumpResult, SafeRc};
+use tycho_vm::{DumpOutput, DumpResult, SafeRc, codepage0};
 
 use crate::core::*;
 
@@ -23,13 +23,31 @@ impl VmUtils {
         Ok(())
     }
 
-    #[cmd(name = "dbrunvm")]
-    #[cmd(name = "dbrunvm-parallel")]
-    #[cmd(name = "vmcont")]
-    #[cmd(name = "vmcont@")]
     #[cmd(name = "runvmx")]
     fn interpret_run_vm(_ctx: &mut Context) -> Result<()> {
         anyhow::bail!("Unimplemented");
+    }
+
+    #[cmd(name = "vmcont,", stack)]
+    fn interpret_store_vm_cont(stack: &mut Stack) -> Result<()> {
+        let vmcont = stack.pop()?.into_vm_cont()?;
+        let mut cb = stack.pop_builder()?;
+        vmcont.store_into(SafeRc::make_mut(&mut cb), Cell::empty_context())?;
+        stack.push_raw(cb.into_dyn_fift_value())
+    }
+
+    #[cmd(name = "vmcont@", stack)]
+    fn interpret_fetch_vm_cont(stack: &mut Stack) -> Result<()> {
+        let mut cs_raw = stack.pop_cell_slice()?;
+        let mut cs = cs_raw.apply();
+
+        let vmcont = tycho_vm::RcCont::load_from(&mut cs)?;
+
+        let range = cs.range();
+        SafeRc::make_mut(&mut cs_raw).set_range(range);
+
+        stack.push_raw(cs_raw.into_dyn_fift_value())?;
+        stack.push(vmcont)
     }
 
     #[cmd(name = "(vmoplen)", stack)]
@@ -65,6 +83,18 @@ impl VmUtils {
 
         stack.push_raw(cs_raw.into_dyn_fift_value())?;
         stack.push(dump.0)
+    }
+
+    #[cmd(name = "supported-version", stack)]
+    fn interpret_supported_version(stack: &mut Stack) -> Result<()> {
+        stack.push_int(
+            const {
+                match tycho_vm::VmVersion::LATEST_TON {
+                    tycho_vm::VmVersion::Ton(v) => v,
+                    tycho_vm::VmVersion::Everscale(_) => unreachable!(),
+                }
+            },
+        )
     }
 }
 
