@@ -17,16 +17,29 @@ pub struct ImmediateInt {
 
 impl ImmediateInt {
     pub fn try_from_str(s: &str) -> Result<Option<Self>> {
-        let (num, denom) = if let Some((left, right)) = s.split_once('/') {
-            let Some(num) = Self::parse_single_number(left)? else {
+        let (num, denom) = if let Some((left, right)) = s.split_once('.') {
+            let Some(mut left) = Self::parse_single_number(left)? else {
                 return Ok(None);
             };
-            let Some(denom) = Self::parse_single_number(right)? else {
+            let Ok(denom) = BigInt::from_str_radix(right, left.base) else {
+                anyhow::bail!("Invalid number");
+            };
+
+            let scale = BigInt::from(left.base).pow(right.len() as u32);
+            left.num *= &scale;
+            left.num += denom;
+            (left.num, Some(scale))
+        } else if let Some((left, right)) = s.split_once('/') {
+            let Some(SingleParsedNumber { num, .. }) = Self::parse_single_number(left)? else {
+                return Ok(None);
+            };
+            let Some(SingleParsedNumber { num: denom, .. }) = Self::parse_single_number(right)?
+            else {
                 anyhow::bail!("Invalid number");
             };
             (num, Some(denom))
         } else {
-            let Some(num) = Self::parse_single_number(s)? else {
+            let Some(SingleParsedNumber { num, .. }) = Self::parse_single_number(s)? else {
                 return Ok(None);
             };
             (num, None)
@@ -34,29 +47,38 @@ impl ImmediateInt {
         Ok(Some(ImmediateInt { num, denom }))
     }
 
-    fn parse_single_number(s: &str) -> Result<Option<BigInt>> {
-        let (neg, s) = match s.strip_prefix('-') {
+    // Returns parsed int and its base.
+    fn parse_single_number(s: &str) -> Result<Option<SingleParsedNumber>> {
+        let (neg, mut s) = match s.strip_prefix('-') {
             Some(s) => (true, s),
             None => (false, s),
         };
 
-        let mut num = if let Some(s) = s.strip_prefix("0x") {
-            BigInt::from_str_radix(s, 16)
-        } else if let Some(s) = s.strip_prefix("0b") {
-            BigInt::from_str_radix(s, 2)
+        let base = if let Some(stripped) = s.strip_prefix("0x") {
+            s = stripped;
+            16
+        } else if let Some(stripped) = s.strip_prefix("0b") {
+            s = stripped;
+            2
         } else {
             if !s.chars().all(|c| c.is_ascii_digit()) {
                 return Ok(None);
             }
-            BigInt::from_str_radix(s, 10)
-        }?;
+            10
+        };
 
+        let mut num = BigInt::from_str_radix(s, base)?;
         if neg {
             num = -num;
         }
 
-        Ok(Some(num))
+        Ok(Some(SingleParsedNumber { base, num }))
     }
+}
+
+struct SingleParsedNumber {
+    base: u32,
+    num: BigInt,
 }
 
 pub(crate) fn reverse_utf8_string_inplace(s: &mut str) {

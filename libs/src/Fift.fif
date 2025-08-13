@@ -123,10 +123,6 @@ variable base
 { 9 hold } : +tab
 { "" swap { 0 word 2dup $cmp } { rot swap $+ +cr swap } while 2drop } : scan-until-word
 { 0 word -trailing scan-until-word 1 'nop } ::_ $<<
-
-{ count } : []len
-{ tpop } : []pop
-
 { 0x40 runvmx } : runvmcode
 { 0x48 runvmx } : gasrunvmcode
 { 0xc8 runvmx } : gas2runvmcode
