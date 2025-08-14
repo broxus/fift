@@ -157,7 +157,7 @@ impl DictUtils {
     #[cmd(name = "dictmapext", tail, args(ext = true, s = false))]
     #[cmd(name = "idictmapext", tail, args(ext = true, s = true))]
     fn interpret_dict_map(ctx: &mut Context, ext: bool, s: bool) -> Result<Option<RcFiftCont>> {
-        let func = ctx.stack.pop_cont_owned()?;
+        let func = ctx.stack.pop_cont()?;
         let bits = ctx.stack.pop_smallint_range(0, MAX_KEY_BITS)? as u16;
         let cell = pop_maybe_cell(&mut ctx.stack)?;
         Ok(Some(RcFiftCont::new_dyn_fift_cont(LoopCont::new(
@@ -178,7 +178,7 @@ impl DictUtils {
     #[cmd(name = "dictforeachrev", tail, args(r = true, s = false))]
     #[cmd(name = "idictforeachrev", tail, args(r = true, s = true))]
     fn interpret_dict_foreach(ctx: &mut Context, r: bool, s: bool) -> Result<Option<RcFiftCont>> {
-        let func = ctx.stack.pop_cont_owned()?;
+        let func = ctx.stack.pop_cont()?;
         let bits = ctx.stack.pop_smallint_range(0, MAX_KEY_BITS)? as u16;
         let cell = pop_maybe_cell(&mut ctx.stack)?;
         Ok(Some(RcFiftCont::new_dyn_fift_cont(LoopCont::new(
@@ -194,7 +194,7 @@ impl DictUtils {
 
     #[cmd(name = "dictmerge", tail)]
     fn interpret_dict_merge(ctx: &mut Context) -> Result<Option<RcFiftCont>> {
-        let func = ctx.stack.pop_cont_owned()?;
+        let func = ctx.stack.pop_cont()?;
         let bits = ctx.stack.pop_smallint_range(0, MAX_KEY_BITS)? as u16;
         let right = pop_maybe_cell(&mut ctx.stack)?;
         let left = pop_maybe_cell(&mut ctx.stack)?;
@@ -212,7 +212,7 @@ impl DictUtils {
 
     #[cmd(name = "dictdiff", tail)]
     fn interpret_dict_diff(ctx: &mut Context) -> Result<Option<RcFiftCont>> {
-        let func = ctx.stack.pop_cont_owned()?;
+        let func = ctx.stack.pop_cont()?;
         let bits = ctx.stack.pop_smallint_range(0, MAX_KEY_BITS)? as u16;
         let right = pop_maybe_cell(&mut ctx.stack)?;
         let left = pop_maybe_cell(&mut ctx.stack)?;

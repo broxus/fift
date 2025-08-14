@@ -34,24 +34,24 @@ impl Control {
     #[cmd(name = "execute", tail)]
     fn interpret_execute(ctx: &mut Context) -> Result<Option<RcFiftCont>> {
         let cont = ctx.stack.pop_cont()?;
-        Ok(Some(cont.as_ref().clone()))
+        Ok(Some(cont))
     }
 
     #[cmd(name = "call/cc", tail)]
     fn interpret_call_cc(ctx: &mut Context) -> Result<Option<RcFiftCont>> {
         let next = ctx.stack.pop_cont()?;
         if let Some(next) = ctx.next.take() {
-            ctx.stack.push(next)?;
+            ctx.stack.push_raw(next.into_dyn_fift_value())?;
         } else {
             ctx.stack.push_null()?;
         }
-        Ok(Some(next.as_ref().clone()))
+        Ok(Some(next))
     }
 
     #[cmd(name = "times", tail)]
     fn interpret_execute_times(ctx: &mut Context) -> Result<Option<RcFiftCont>> {
         let count = ctx.stack.pop_smallint_range(0, 1000000000)? as usize;
-        let body = ctx.stack.pop_cont_owned()?;
+        let body = ctx.stack.pop_cont()?;
         Ok(match count {
             0 => None,
             1 => Some(body),
@@ -70,7 +70,7 @@ impl Control {
     fn interpret_if(ctx: &mut Context) -> Result<Option<RcFiftCont>> {
         let true_ref = ctx.stack.pop_cont()?;
         Ok(if ctx.stack.pop_bool()? {
-            Some(true_ref.as_ref().clone())
+            Some(true_ref)
         } else {
             None
         })
@@ -82,7 +82,7 @@ impl Control {
         Ok(if ctx.stack.pop_bool()? {
             None
         } else {
-            Some(false_ref.as_ref().clone())
+            Some(false_ref)
         })
     }
 
@@ -91,16 +91,16 @@ impl Control {
         let false_ref = ctx.stack.pop_cont()?;
         let true_ref = ctx.stack.pop_cont()?;
         Ok(Some(if ctx.stack.pop_bool()? {
-            true_ref.as_ref().clone()
+            true_ref
         } else {
-            false_ref.as_ref().clone()
+            false_ref
         }))
     }
 
     #[cmd(name = "while", tail)]
     fn interpret_while(ctx: &mut Context) -> Result<Option<RcFiftCont>> {
-        let body = ctx.stack.pop_cont_owned()?;
-        let cond = ctx.stack.pop_cont_owned()?;
+        let body = ctx.stack.pop_cont()?;
+        let cond = ctx.stack.pop_cont()?;
         ctx.next = Some(RcFiftCont::new_dyn_fift_cont(cont::WhileCont {
             condition: Some(cond.clone()),
             body: Some(body),
@@ -112,7 +112,7 @@ impl Control {
 
     #[cmd(name = "until", tail)]
     fn interpret_until(ctx: &mut Context) -> Result<Option<RcFiftCont>> {
-        let body = ctx.stack.pop_cont_owned()?;
+        let body = ctx.stack.pop_cont()?;
         ctx.next = Some(SafeRc::new_dyn_fift_cont(cont::UntilCont {
             body: Some(body.clone()),
             after: ctx.next.take(),
@@ -156,7 +156,8 @@ impl Control {
     #[cmd(name = "(})")]
     fn interpret_wordlist_end_aux(ctx: &mut Context) -> Result<()> {
         let word_list = ctx.stack.pop_word_list()?;
-        ctx.stack.push(SafeRc::into_inner(word_list).finish())
+        ctx.stack
+            .push_raw(SafeRc::into_inner(word_list).finish().into_dyn_fift_value())
     }
 
     #[cmd(name = "(compile)")]
@@ -194,7 +195,7 @@ impl Control {
             None
         } else {
             // Interpret active word
-            Some(ctx.stack.pop_cont_owned()?)
+            Some(ctx.stack.pop_cont()?)
         })
     }
 
@@ -205,7 +206,8 @@ impl Control {
             .dicts
             .lookup(&word, true)?
             .with_context(|| format!("Undefined word `{word}`"))?;
-        ctx.stack.push(entry.definition.clone())?;
+        ctx.stack
+            .push_raw(entry.definition.clone().into_dyn_fift_value())?;
         ctx.stack.push_argcount(1)
     }
 
@@ -221,7 +223,8 @@ impl Control {
         let word = ctx.stack.pop_string()?;
         match ctx.dicts.lookup(&word, true)? {
             Some(entry) => {
-                ctx.stack.push(entry.definition.clone())?;
+                ctx.stack
+                    .push_raw(entry.definition.clone().into_dyn_fift_value())?;
                 ctx.stack.push_bool(true)
             }
             None => ctx.stack.push_bool(false),
@@ -274,7 +277,8 @@ impl Control {
                 ctx.stack.push_int(0)
             }
             Some(entry) => {
-                ctx.stack.push(entry.definition.clone())?;
+                ctx.stack
+                    .push_raw(entry.definition.clone().into_dyn_fift_value())?;
                 ctx.stack.push_int(if entry.active { 1 } else { -1 })
             }
         }
@@ -286,15 +290,10 @@ impl Control {
         let cont = ctx.stack.pop_cont()?;
         let word = ctx.input.scan_word()?.ok_or(UnexpectedEof)?.to_owned();
 
-        define_word(
-            &mut ctx.dicts.current,
-            word,
-            cont.as_ref().clone(),
-            DefMode {
-                active: false,
-                prefix: false,
-            },
-        )
+        define_word(&mut ctx.dicts.current, word, cont, DefMode {
+            active: false,
+            prefix: false,
+        })
     }
 
     #[cmd(name = "(create)", args(mode = None))]
@@ -310,7 +309,7 @@ impl Control {
             }
         };
         let word = ctx.stack.pop_string_owned()?;
-        let cont = ctx.stack.pop_cont_owned()?;
+        let cont = ctx.stack.pop_cont()?;
         define_word(&mut ctx.dicts.current, word, cont, mode)
     }
 
@@ -333,7 +332,7 @@ impl Control {
         ctx.stack.push(name.to_owned())?;
         ctx.stack.push_int(mode)?;
         ctx.stack.push_int(2)?;
-        ctx.stack.push(cont)
+        ctx.stack.push_raw(cont.into_dyn_fift_value())
     }
 
     #[cmd(name = "forget", args(word_from_stack = false))]
@@ -463,7 +462,7 @@ impl Control {
         let cont = ctx.exit_interpret.fetch();
         ctx.next = None;
         Ok(if !cont.is_null() {
-            Some(cont.into_cont()?.as_ref().clone())
+            Some(cont.into_cont()?)
         } else {
             None
         })
@@ -498,7 +497,12 @@ impl Control {
     }
 }
 
-fn define_word(d: &mut Dictionary, mut word: String, cont: RcFiftCont, mode: DefMode) -> Result<()> {
+fn define_word(
+    d: &mut Dictionary,
+    mut word: String,
+    cont: RcFiftCont,
+    mode: DefMode,
+) -> Result<()> {
     anyhow::ensure!(!word.is_empty(), "Word definition is empty");
     if !mode.prefix {
         word.push(' ');
@@ -515,6 +519,7 @@ struct DefMode {
     prefix: bool,
 }
 
+#[derive(Clone)]
 struct ResetContextCont(SafeRc<SharedBox>);
 
 impl cont::FiftCont for ResetContextCont {
@@ -528,6 +533,7 @@ impl cont::FiftCont for ResetContextCont {
     }
 }
 
+#[derive(Clone, Copy)]
 struct ExitInterpretCont;
 
 impl cont::FiftCont for ExitInterpretCont {
@@ -541,6 +547,7 @@ impl cont::FiftCont for ExitInterpretCont {
     }
 }
 
+#[derive(Clone, Copy)]
 struct ExitSourceBlockCont;
 
 impl cont::FiftCont for ExitSourceBlockCont {

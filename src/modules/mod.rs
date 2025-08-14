@@ -371,7 +371,7 @@ impl FiftModule for BaseModule {
 
     #[cmd(name = "hmapforeach", tail)]
     fn interpret_hmap_foreach(ctx: &mut Context) -> Result<Option<RcFiftCont>> {
-        let func = ctx.stack.pop_cont_owned()?;
+        let func = ctx.stack.pop_cont()?;
         let Some(map) = ctx.stack.pop_hashmap()? else {
             return Ok(None);
         };

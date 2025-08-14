@@ -3,7 +3,6 @@ use std::rc::Rc;
 
 use ahash::HashMap;
 use anyhow::Result;
-use dyn_clone::DynClone;
 use num_bigint::BigInt;
 use num_traits::{One, ToPrimitive, Zero};
 use tycho_types::prelude::*;
@@ -258,15 +257,8 @@ impl Stack {
         self.pop()?.into_cell_slice()
     }
 
-    pub fn pop_cont(&mut self) -> Result<SafeRc<RcFiftCont>> {
+    pub fn pop_cont(&mut self) -> Result<RcFiftCont> {
         self.pop()?.into_cont()
-    }
-
-    pub fn pop_cont_owned(&mut self) -> Result<RcFiftCont> {
-        Ok(match SafeRc::try_unwrap(self.pop()?.into_cont()?) {
-            Ok(inner) => inner,
-            Err(rc) => rc.as_ref().clone(),
-        })
     }
 
     pub fn pop_word_list(&mut self) -> Result<SafeRc<WordList>> {
@@ -363,7 +355,7 @@ macro_rules! define_stack_value {
             $($name),*,
         }
 
-        pub trait $trait: SafeDelete + DynClone {
+        pub trait $trait: SafeDelete {
             fn ty(&self) -> $value_type;
 
             fn is_equal(&self, other: &dyn $trait) -> bool;
@@ -384,8 +376,6 @@ macro_rules! define_stack_value {
                 }.into())
             })*
         }
-
-        dyn_clone::clone_trait_object!($trait);
 
         $(impl $trait for $ty {
             fn ty(&self) -> $value_type {
@@ -490,10 +480,10 @@ define_stack_value! {
             as_tuple(v): &StackTuple = Ok(v),
             rc_into_tuple,
         },
-        Cont(RcFiftCont) = {
-            eq(a, b) = SafeRc::ptr_eq(a, b),
-            fmt_dump(v, f) = write!(f, "Cont{{{:?}}}", SafeRc::as_ptr(v) as *const ()),
-            as_cont(v): &RcFiftCont = Ok(v),
+        Cont(dyn FiftCont) = {
+            eq(a, b) = std::ptr::addr_eq(a, b),
+            fmt_dump(v, f) = write!(f, "Cont{{{:?}}}", v as *const _ as *const ()),
+            as_cont(v): &dyn FiftCont = Ok(v),
             rc_into_cont,
         },
         WordList(WordList) = {
@@ -502,8 +492,8 @@ define_stack_value! {
             as_word_list(v): &WordList = Ok(v),
             rc_into_word_list,
             {
-                fn rc_into_cont(self: Rc<Self>) -> Result<Rc<RcFiftCont>> {
-                    Ok(Rc::new(self.finish()))
+                fn rc_into_cont(self: Rc<Self>) -> Result<Rc<dyn FiftCont>> {
+                    Ok(SafeRc::into_inner(self.finish()))
                 }
             }
         },
@@ -525,10 +515,10 @@ define_stack_value! {
             as_hashmap(v): &HashMapTreeNode = Ok(v),
             rc_into_hashmap,
         },
-        VmCont(tycho_vm::RcCont) = {
-            eq(a, b) = SafeRc::ptr_eq(a, b),
-            fmt_dump(v, f) = write!(f, "VmCont{{{:?}}}", SafeRc::as_ptr(v) as *const ()),
-            as_vm_cont(v): &tycho_vm::RcCont = Ok(v),
+        VmCont(dyn tycho_vm::Cont) = {
+            eq(a, b) = std::ptr::addr_eq(a, b),
+            fmt_dump(v, f) = write!(f, "VmCont{{{:?}}}", v as *const _ as *const ()),
+            as_vm_cont(v): &dyn tycho_vm::Cont = Ok(v),
             rc_into_vm_cont,
         },
     }
@@ -636,13 +626,13 @@ pub trait DynFiftValue {
     fn into_cell(self) -> Result<SafeRc<Cell>>;
     fn into_builder(self) -> Result<SafeRc<CellBuilder>>;
     fn into_cell_slice(self) -> Result<SafeRc<OwnedCellSlice>>;
-    fn into_cont(self) -> Result<SafeRc<RcFiftCont>>;
+    fn into_cont(self) -> Result<RcFiftCont>;
     fn into_word_list(self) -> Result<SafeRc<WordList>>;
     fn into_tuple(self) -> Result<SafeRc<StackTuple>>;
     fn into_shared_box(self) -> Result<SafeRc<SharedBox>>;
     fn into_atom(self) -> Result<SafeRc<Atom>>;
     fn into_hashmap(self) -> Result<SafeRc<HashMapTreeNode>>;
-    fn into_vm_cont(self) -> Result<SafeRc<tycho_vm::RcCont>>;
+    fn into_vm_cont(self) -> Result<tycho_vm::RcCont>;
 }
 
 impl DynFiftValue for SafeRc<dyn StackValue> {
@@ -679,7 +669,7 @@ impl DynFiftValue for SafeRc<dyn StackValue> {
             .map(SafeRc::from)
     }
 
-    fn into_cont(self) -> Result<SafeRc<RcFiftCont>> {
+    fn into_cont(self) -> Result<RcFiftCont> {
         Self::into_inner(self).rc_into_cont().map(SafeRc::from)
     }
 
@@ -705,7 +695,7 @@ impl DynFiftValue for SafeRc<dyn StackValue> {
         Self::into_inner(self).rc_into_hashmap().map(SafeRc::from)
     }
 
-    fn into_vm_cont(self) -> Result<SafeRc<tycho_vm::RcCont>> {
+    fn into_vm_cont(self) -> Result<tycho_vm::RcCont> {
         Self::into_inner(self).rc_into_vm_cont().map(SafeRc::from)
     }
 }
@@ -726,6 +716,24 @@ impl<T: StackValue> IntoDynFiftValue for SafeRc<T> {
     #[inline]
     fn into_dyn_fift_value(self) -> SafeRc<dyn StackValue> {
         Rc::<T>::into_dyn_fift_value(SafeRc::into_inner(self))
+    }
+}
+
+impl IntoDynFiftValue for RcFiftCont {
+    #[inline]
+    fn into_dyn_fift_value(self) -> SafeRc<dyn StackValue> {
+        SafeRc::from(SafeRc::into_inner(self).rc_into_dyn_fift_value())
+    }
+}
+
+pub trait RcIntoDynFiftValue {
+    fn rc_into_dyn_fift_value(self: Rc<Self>) -> Rc<dyn StackValue>;
+}
+
+impl<T: StackValue> RcIntoDynFiftValue for T {
+    #[inline]
+    fn rc_into_dyn_fift_value(self: Rc<Self>) -> Rc<dyn StackValue> {
+        self
     }
 }
 

@@ -1,12 +1,12 @@
 use anyhow::Result;
 use tycho_vm::SafeRc;
 
-use super::cont::{RcFiftCont, FiftCont, ContextTailWordFunc, ContextWordFunc, StackWordFunc};
+use super::cont::{ContextTailWordFunc, ContextWordFunc, FiftCont, RcFiftCont, StackWordFunc};
 use super::stack::{
     DynFiftValue, HashMapTreeKey, HashMapTreeKeyRef, HashMapTreeNode, SharedBox, StackValue,
     StackValueType,
 };
-use super::{DynFiftCont, IntoDynFiftCont};
+use super::{DynFiftCont, IntoDynFiftCont, IntoDynFiftValue};
 
 pub struct Dictionaries {
     pub current: Dictionary,
@@ -92,22 +92,17 @@ impl Dictionary {
         let Some(node) = HashMapTreeNode::lookup(&map, key) else {
             return Ok(None);
         };
-        Ok(DictionaryEntry::try_from_value(node.value.as_ref()))
+        Ok(DictionaryEntry::try_from_value(node.value.clone()))
     }
 
     pub fn resolve_name(&self, definition: &dyn FiftCont) -> Option<SafeRc<String>> {
         let map = self.words.borrow();
         if let Ok(map) = map.as_hashmap() {
             for entry in map {
-                let Some((cont, _)) = DictionaryEntry::cont_from_value(entry.value.as_ref()) else {
+                let Some((cont, _)) = DictionaryEntry::cont_ref_from_value(&*entry.value) else {
                     continue;
                 };
-
-                // NOTE: erase trait data from fat pointers
-                let left = SafeRc::as_ptr(cont) as *const ();
-                let right = definition as *const _ as *const ();
-                // Compare only the address part
-                if std::ptr::eq(left, right) {
+                if std::ptr::addr_eq(cont, definition) {
                     return entry.key.stack_value.clone().into_string().ok();
                 }
             }
@@ -185,17 +180,26 @@ pub struct DictionaryEntry {
 }
 
 impl DictionaryEntry {
-    fn try_from_value(value: &dyn StackValue) -> Option<Self> {
-        let (cont, active) = Self::cont_from_value(value)?;
-        Some(Self {
-            definition: cont.clone(),
-            active,
-        })
+    fn try_from_value(value: SafeRc<dyn StackValue>) -> Option<Self> {
+        let (definition, active) = Self::cont_from_value(value)?;
+        Some(Self { definition, active })
     }
 
-    fn cont_from_value(value: &dyn StackValue) -> Option<(&RcFiftCont, bool)> {
-        if let Ok(cont) = value.as_cont() {
-            return Some((cont, false));
+    fn cont_from_value(value: SafeRc<dyn StackValue>) -> Option<(RcFiftCont, bool)> {
+        if value.ty() == StackValueType::Cont {
+            return Some((value.into_cont().unwrap(), false));
+        } else if let Ok(tuple) = value.as_tuple()
+            && tuple.len() == 1
+            && let Ok(cont) = tuple.first().cloned()?.into_cont()
+        {
+            return Some((cont, true));
+        }
+        None
+    }
+
+    fn cont_ref_from_value(value: &dyn StackValue) -> Option<(&dyn FiftCont, bool)> {
+        if let Ok(value) = value.as_cont() {
+            return Some((value, false));
         } else if let Ok(tuple) = value.as_tuple()
             && tuple.len() == 1
             && let Ok(cont) = tuple.first()?.as_cont()
@@ -226,7 +230,7 @@ impl<T: FiftCont + 'static> From<SafeRc<T>> for DictionaryEntry {
 
 impl From<DictionaryEntry> for SafeRc<dyn StackValue> {
     fn from(value: DictionaryEntry) -> Self {
-        let cont = SafeRc::new_dyn_fift_value(value.definition);
+        let cont = value.definition.into_dyn_fift_value();
         if value.active {
             SafeRc::new_dyn_fift_value(vec![cont])
         } else {

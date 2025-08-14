@@ -5,7 +5,7 @@ use anyhow::{Context as _, Result};
 pub use fift_proc::fift_module;
 use tycho_vm::SafeRc;
 
-pub use self::cont::{RcFiftCont, FiftCont, DynFiftCont, IntoDynFiftCont};
+pub use self::cont::{DynFiftCont, FiftCont, IntoDynFiftCont, RcFiftCont};
 pub use self::dictionary::{Dictionaries, Dictionary, DictionaryEntry};
 pub use self::env::{Environment, SourceBlock};
 pub use self::lexer::Lexer;
@@ -99,7 +99,7 @@ impl<'a> Context<'a> {
         let cont = self.stack.pop_cont()?;
         let count = self.stack.pop_smallint_range(0, 255)? as usize;
         self.stack.check_underflow(count)?;
-        Ok(cont.as_ref().clone())
+        Ok(cont)
     }
 
     pub(crate) fn compile_stack_top(&mut self) -> Result<()> {
@@ -108,7 +108,9 @@ impl<'a> Context<'a> {
 
         let cont = match count {
             0 => None,
-            1 => Some(RcFiftCont::new_dyn_fift_cont(cont::LitCont(self.stack.pop()?))),
+            1 => Some(RcFiftCont::new_dyn_fift_cont(cont::LitCont(
+                self.stack.pop()?,
+            ))),
             _ => {
                 let mut literals = Vec::with_capacity(count);
                 for _ in 0..count {
@@ -124,7 +126,7 @@ impl<'a> Context<'a> {
             let word_list = SafeRc::make_mut(&mut word_list);
             word_list.items.extend(cont);
 
-            if !cont::NopCont::is_nop(&**word_def) {
+            if !cont::NopCont::is_nop(word_def.as_ref()) {
                 word_list.items.push(SafeRc::clone(&word_def));
             }
         }

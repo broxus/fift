@@ -51,15 +51,16 @@ impl CmdArgsUtils {
 
         d.define_word(
             "$* ",
-            RcFiftCont::new_dyn_fift_cont(cont::LitCont(SafeRc::new_dyn_fift_value(SharedBox::new(
-                list,
-            )))),
+            RcFiftCont::new_dyn_fift_cont(cont::LitCont(SafeRc::new_dyn_fift_value(
+                SharedBox::new(list),
+            ))),
         )?;
 
         Ok(())
     }
 }
 
+#[derive(Clone)]
 struct CmdArgCont(Vec<SafeRc<dyn StackValue>>);
 
 impl FiftCont for CmdArgCont {

@@ -5,8 +5,9 @@ use anyhow::Result;
 use num_bigint::BigInt;
 use tycho_vm::{SafeDelete, SafeRc};
 
+use super::stack::RcIntoDynFiftValue;
 use super::{Context, Dictionary, Stack, StackValue, StackValueType, WordList};
-use crate::core::DynFiftValue;
+use crate::core::IntoDynFiftValue;
 use crate::util::*;
 
 pub trait DynFiftCont {
@@ -42,7 +43,7 @@ impl<T: FiftCont> IntoDynFiftCont for SafeRc<T> {
 
 pub type RcFiftCont = SafeRc<dyn FiftCont>;
 
-pub trait FiftCont: SafeDelete {
+pub trait FiftCont: SafeDelete + RcIntoDynFiftValue {
     fn run(self: Rc<Self>, ctx: &mut Context) -> Result<Option<RcFiftCont>>;
 
     fn up(&self) -> Option<&RcFiftCont> {
@@ -113,6 +114,29 @@ impl dyn FiftCont + '_ {
     }
 }
 
+impl<T: FiftCont + 'static> StackValue for T {
+    fn ty(&self) -> StackValueType {
+        StackValueType::Cont
+    }
+
+    fn is_equal(&self, other: &dyn StackValue) -> bool {
+        StackValue::is_equal(self as &dyn FiftCont, other)
+    }
+
+    fn fmt_dump(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        StackValue::fmt_dump(self as &dyn FiftCont, f)
+    }
+
+    fn as_cont(&self) -> ::anyhow::Result<&dyn FiftCont> {
+        Ok(self)
+    }
+
+    fn rc_into_cont(self: Rc<Self>) -> Result<Rc<dyn FiftCont>> {
+        Ok(self)
+    }
+}
+
+#[derive(Clone, Copy)]
 pub struct InterpreterCont;
 
 impl FiftCont for InterpreterCont {
@@ -194,12 +218,12 @@ impl FiftCont for InterpreterCont {
                     return Ok(Some(entry.definition.clone()));
                 } else {
                     ctx.stack.push_int(0)?;
-                    ctx.stack.push(entry.definition.clone())?;
+                    ctx.stack.push_raw(entry.definition.into_dyn_fift_value())?;
                 }
             };
 
             ctx.exit_interpret.store(match &ctx.next {
-                Some(next) => SafeRc::new_dyn_fift_value(next.clone()),
+                Some(next) => next.clone().into_dyn_fift_value(),
                 None => NopCont::value_instance(),
             });
 
@@ -213,6 +237,7 @@ impl FiftCont for InterpreterCont {
     }
 }
 
+#[derive(Clone, Copy)]
 struct CompileExecuteCont;
 
 impl FiftCont for CompileExecuteCont {
@@ -230,6 +255,7 @@ impl FiftCont for CompileExecuteCont {
     }
 }
 
+#[derive(Clone)]
 pub struct ListCont {
     pub list: Rc<WordList>,
     pub after: Option<RcFiftCont>,
@@ -318,13 +344,14 @@ impl FiftCont for ListCont {
     }
 }
 
+#[derive(Clone, Copy)]
 pub struct NopCont;
 
 impl NopCont {
     thread_local! {
         static INSTANCE: (RcFiftCont, SafeRc<dyn StackValue>) = {
             let cont = RcFiftCont::new_dyn_fift_cont(NopCont);
-            let value: SafeRc<dyn StackValue> = SafeRc::new_dyn_fift_value(cont.clone());
+            let value: SafeRc<dyn StackValue> = cont.clone().into_dyn_fift_value();
             (cont, value)
         };
     }
@@ -339,8 +366,7 @@ impl NopCont {
 
     pub fn is_nop(cont: &dyn FiftCont) -> bool {
         let left = Self::INSTANCE.with(|(c, _)| SafeRc::as_ptr(c) as *const ());
-        let right = cont as *const _ as *const ();
-        std::ptr::eq(left, right)
+        std::ptr::addr_eq(left, cont)
     }
 }
 
@@ -354,6 +380,7 @@ impl FiftCont for NopCont {
     }
 }
 
+#[derive(Clone)]
 pub struct SeqCont {
     pub first: Option<RcFiftCont>,
     pub second: Option<RcFiftCont>,
@@ -415,6 +442,7 @@ impl FiftCont for SeqCont {
     }
 }
 
+#[derive(Clone)]
 pub struct TimesCont {
     pub body: Option<RcFiftCont>,
     pub after: Option<RcFiftCont>,
@@ -472,6 +500,7 @@ impl FiftCont for TimesCont {
     }
 }
 
+#[derive(Clone)]
 pub struct UntilCont {
     pub body: Option<RcFiftCont>,
     pub after: Option<RcFiftCont>,
@@ -524,6 +553,7 @@ impl FiftCont for UntilCont {
     }
 }
 
+#[derive(Clone)]
 pub struct WhileCont {
     pub condition: Option<RcFiftCont>,
     pub body: Option<RcFiftCont>,
@@ -601,6 +631,18 @@ pub struct LoopCont<T> {
     state: LoopContState,
     func: RcFiftCont,
     after: Option<RcFiftCont>,
+}
+
+impl<T: Clone> Clone for LoopCont<T> {
+    #[inline]
+    fn clone(&self) -> Self {
+        Self {
+            inner: self.inner.clone(),
+            state: self.state,
+            func: self.func.clone(),
+            after: self.after.clone(),
+        }
+    }
 }
 
 impl<T> LoopCont<T> {
@@ -695,6 +737,7 @@ enum LoopContState {
     Finalize,
 }
 
+#[derive(Clone)]
 pub struct IntLitCont(BigInt);
 
 impl<T> From<T> for IntLitCont
@@ -721,6 +764,7 @@ impl FiftCont for IntLitCont {
     }
 }
 
+#[derive(Clone)]
 pub struct LitCont(pub SafeRc<dyn StackValue>);
 
 impl FiftCont for LitCont {
@@ -738,6 +782,7 @@ impl FiftCont for LitCont {
     }
 }
 
+#[derive(Clone)]
 pub struct MultiLitCont(pub Vec<SafeRc<dyn StackValue>>);
 
 impl FiftCont for MultiLitCont {

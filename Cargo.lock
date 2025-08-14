@@ -311,7 +311,6 @@ dependencies = [
  "anyhow",
  "base64",
  "crc",
- "dyn-clone",
  "fift-proc",
  "hex",
  "num-bigint",

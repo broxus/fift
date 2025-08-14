@@ -2,6 +2,7 @@ use std::rc::Rc;
 
 use anyhow::Result;
 use num_traits::Zero;
+use tycho_vm::SafeRc;
 
 use crate::core::*;
 
@@ -158,11 +159,11 @@ impl StackUtils {
         }
 
         match (x, y) {
-            (0, 0) => stack.push(cont::NopCont::instance()),
-            (0, 1) => stack.push(RcFiftCont::new_dyn_fift_cont(
+            (0, 0) => stack.push_raw(cont::NopCont::instance().into_dyn_fift_value()),
+            (0, 1) => stack.push_raw(SafeRc::new_dyn_fift_value(
                 interpret_swap as cont::StackWordFunc,
             )),
-            _ => stack.push(RcFiftCont::new_dyn_fift_cont(XchgCont { x, y })),
+            _ => stack.push_raw(SafeRc::new_dyn_fift_value(XchgCont { x, y })),
         }
     }
 
@@ -170,13 +171,13 @@ impl StackUtils {
     fn interpret_make_push(stack: &mut Stack) -> Result<()> {
         let x = stack.pop_smallint_range(0, 255)?;
         match x {
-            0 => stack.push(RcFiftCont::new_dyn_fift_cont(
+            0 => stack.push_raw(SafeRc::new_dyn_fift_value(
                 interpret_dup as cont::StackWordFunc,
             )),
-            1 => stack.push(RcFiftCont::new_dyn_fift_cont(
+            1 => stack.push_raw(SafeRc::new_dyn_fift_value(
                 interpret_over as cont::StackWordFunc,
             )),
-            _ => stack.push(RcFiftCont::new_dyn_fift_cont(PushCont(x))),
+            _ => stack.push_raw(SafeRc::new_dyn_fift_value(PushCont(x))),
         }
     }
 
@@ -184,17 +185,18 @@ impl StackUtils {
     fn interpret_make_pop(stack: &mut Stack) -> Result<()> {
         let x = stack.pop_smallint_range(0, 255)?;
         match x {
-            0 => stack.push(RcFiftCont::new_dyn_fift_cont(
+            0 => stack.push_raw(SafeRc::new_dyn_fift_value(
                 interpret_drop as cont::StackWordFunc,
             )),
-            1 => stack.push(RcFiftCont::new_dyn_fift_cont(
+            1 => stack.push_raw(SafeRc::new_dyn_fift_value(
                 interpret_nip as cont::StackWordFunc,
             )),
-            _ => stack.push(RcFiftCont::new_dyn_fift_cont(PopCont(x))),
+            _ => stack.push_raw(SafeRc::new_dyn_fift_value(PopCont(x))),
         }
     }
 }
 
+#[derive(Clone, Copy)]
 struct XchgCont {
     x: u32,
     y: u32,
@@ -211,6 +213,7 @@ impl cont::FiftCont for XchgCont {
     }
 }
 
+#[derive(Clone, Copy)]
 struct PushCont(u32);
 
 impl cont::FiftCont for PushCont {
@@ -225,6 +228,7 @@ impl cont::FiftCont for PushCont {
     }
 }
 
+#[derive(Clone, Copy)]
 struct PopCont(u32);
 
 impl cont::FiftCont for PopCont {
