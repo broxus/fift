@@ -1,4 +1,4 @@
-use std::io::IsTerminal;
+use std::io::{IsTerminal, Write};
 use std::process::ExitCode;
 
 use anyhow::Result;
@@ -72,15 +72,20 @@ fn main() -> Result<ExitCode> {
 
     let mut source_blocks = Vec::new();
 
+    let mut stderr: Box<dyn std::fmt::Write>;
     if interactive {
         if std::io::stdin().is_terminal() {
             let mut line_reader = LineReader::new()?;
             stdout = line_reader.create_external_printer()?;
+            stderr = Box::new(ColorStderrWriter(std::io::stderr()));
             source_blocks.push(SourceBlock::new("<stdin>", line_reader));
         } else {
+            stderr = Box::new(PlainStderrWriter(std::io::stderr()));
             source_blocks.push(SourceBlock::new("<stdin>", std::io::stdin().lock()));
         }
-    }
+    } else {
+        stderr = Box::new(ColorStderrWriter(std::io::stderr()));
+    };
 
     if let Some(path) = rest.first() {
         source_blocks.push(env.include(path)?);
@@ -98,7 +103,7 @@ fn main() -> Result<ExitCode> {
     }
 
     // Prepare Fift context
-    let mut ctx = fift::Context::new(&mut env, &mut stdout)
+    let mut ctx = fift::Context::new(&mut env, &mut stdout, &mut *stderr)
         .with_basic_modules()?
         .with_module(CmdArgsUtils::new(rest))?
         .with_module(ShellUtils)?;
@@ -186,5 +191,23 @@ where
             "",
             style(format!("{:->1$}", "", underlined_len)).red(),
         )
+    }
+}
+
+struct PlainStderrWriter(std::io::Stderr);
+
+impl std::fmt::Write for PlainStderrWriter {
+    fn write_str(&mut self, s: &str) -> std::fmt::Result {
+        self.0.write_all(s.as_bytes()).map_err(|_| std::fmt::Error)
+    }
+}
+
+struct ColorStderrWriter(std::io::Stderr);
+
+impl std::fmt::Write for ColorStderrWriter {
+    fn write_str(&mut self, s: &str) -> std::fmt::Result {
+        self.0
+            .write_fmt(format_args!("{}", style(s).green()))
+            .map_err(|_| std::fmt::Error)
     }
 }

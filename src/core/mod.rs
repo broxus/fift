@@ -1,4 +1,3 @@
-use std::io::Write;
 use std::num::NonZeroU32;
 
 use anyhow::{Context as _, Result};
@@ -34,11 +33,16 @@ pub struct Context<'a> {
     pub exit_interpret: SharedBox,
 
     pub env: &'a mut dyn Environment,
-    pub stdout: &'a mut dyn Write,
+    pub stdout: &'a mut dyn std::io::Write,
+    pub stderr: &'a mut dyn std::fmt::Write,
 }
 
 impl<'a> Context<'a> {
-    pub fn new(env: &'a mut dyn Environment, stdout: &'a mut dyn Write) -> Self {
+    pub fn new(
+        env: &'a mut dyn Environment,
+        stdout: &'a mut dyn std::io::Write,
+        stderr: &'a mut dyn std::fmt::Write,
+    ) -> Self {
         Self {
             state: Default::default(),
             stack: Stack::new(None),
@@ -51,6 +55,7 @@ impl<'a> Context<'a> {
             exit_interpret: Default::default(),
             env,
             stdout,
+            stderr,
         }
     }
 

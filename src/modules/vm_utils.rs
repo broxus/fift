@@ -1,9 +1,12 @@
+use std::cell::RefCell;
 use std::fmt::Write;
+use std::num::NonZeroU64;
 use std::rc::Rc;
 
 use anyhow::Result;
+use tracing::span;
 use tycho_types::prelude::*;
-use tycho_vm::{DumpOutput, DumpResult, GasParams, SafeRc, codepage0};
+use tycho_vm::{DumpOutput, DumpResult, GasParams, SafeRc, VmLogMask, codepage0};
 
 use crate::core::*;
 
@@ -87,6 +90,17 @@ impl VmUtils {
             }))
         });
 
+        let stderr = IoWriter(Rc::new(RefCell::new(ctx.stderr)));
+
+        let mut log_mask = VmLogMask::empty();
+        if mode.contains(RunVmMode::LOG_VM_OPS) {
+            log_mask |= VmLogMask::MESSAGE;
+            if mode.contains(RunVmMode::STACK_TRACE) {
+                log_mask |= VmLogMask::DUMP_STACK;
+            }
+        }
+
+        let mut debug_writer;
         let mut vm = {
             let mut state = tycho_vm::VmState::builder()
                 .with_smc_info(smc_info)
@@ -96,13 +110,29 @@ impl VmUtils {
                     items: fift_tuple_to_vm(stack.take_items()),
                 }))
                 .with_libraries(&libraries)
+                .with_modifiers(tycho_vm::BehaviourModifiers {
+                    log_mask,
+                    ..Default::default()
+                })
                 .with_gas(gas);
             if mode.contains(RunVmMode::SAME_C3) {
                 state = state.with_init_selector(mode.contains(RunVmMode::PUSH_0));
             }
+            if mode.contains(RunVmMode::DEBUG_OPCODES) {
+                debug_writer = stderr.clone();
+                state = state.with_debug(&mut debug_writer);
+            }
             state.build()
         };
-        let res = !vm.run();
+
+        let res = tracing::subscriber::with_default(
+            VmLogSubscriber {
+                // NOTE: Forbidden crimes.
+                writer: unsafe { std::mem::transmute::<IoWriter<'_>, IoWriter<'static>>(stderr) },
+                log_mask,
+            },
+            || !vm.run(),
+        );
 
         stack.set_items({
             let stack = SafeRc::into_inner(std::mem::take(&mut vm.stack));
@@ -279,6 +309,90 @@ fn vm_value_to_fift(item: tycho_vm::RcStackValue) -> SafeRc<dyn StackValue> {
     }
 
     unreachable!()
+}
+
+struct VmLogSubscriber {
+    log_mask: tycho_vm::VmLogMask,
+    writer: IoWriter<'static>,
+}
+
+// NOTE: Forbidden crimes
+unsafe impl Send for VmLogSubscriber {}
+unsafe impl Sync for VmLogSubscriber {}
+
+impl tracing::Subscriber for VmLogSubscriber {
+    fn enabled(&self, metadata: &tracing::Metadata<'_>) -> bool {
+        metadata.target() == tycho_vm::VM_LOG_TARGET
+    }
+
+    fn new_span(&self, _: &span::Attributes<'_>) -> span::Id {
+        span::Id::from_non_zero_u64(NonZeroU64::MIN)
+    }
+
+    fn record(&self, _: &span::Id, _: &span::Record<'_>) {}
+
+    fn record_follows_from(&self, _: &span::Id, _: &span::Id) {}
+
+    fn event(&self, event: &tracing::Event<'_>) {
+        if !self.enabled(event.metadata()) {
+            return;
+        }
+
+        event.record(&mut LogVisitor {
+            writer: &mut *self.writer.0.borrow_mut(),
+            log_mask: self.log_mask,
+        });
+    }
+
+    fn enter(&self, _: &span::Id) {}
+
+    fn exit(&self, _: &span::Id) {}
+}
+
+struct LogVisitor<'a> {
+    log_mask: VmLogMask,
+    writer: &'a mut dyn std::fmt::Write,
+}
+
+impl tracing::field::Visit for LogVisitor<'_> {
+    fn record_debug(&mut self, field: &tracing::field::Field, value: &dyn std::fmt::Debug) {
+        const STACK_MASK: VmLogMask = VmLogMask::DUMP_STACK.union(VmLogMask::DUMP_STACK_VERBOSE);
+
+        let res = match field.name() {
+            "message" if self.log_mask.contains(VmLogMask::MESSAGE) => {
+                writeln!(self.writer, "{value:?}")
+            }
+            "opcode" if self.log_mask.contains(VmLogMask::MESSAGE) => {
+                writeln!(self.writer, "execute {value:?}")
+            }
+            "stack" if self.log_mask.intersects(STACK_MASK) => {
+                writeln!(self.writer, "stack: {value:?}")
+            }
+            "exec_location" if self.log_mask.contains(VmLogMask::EXEC_LOCATION) => {
+                writeln!(self.writer, "code cell hash: {value:?}")
+            }
+            "gas_remaining" if self.log_mask.contains(VmLogMask::GAS_REMAINING) => {
+                writeln!(self.writer, "gas remaining: {value:?}")
+            }
+            "c5" if self.log_mask.contains(VmLogMask::DUMP_C5) => {
+                writeln!(self.writer, "c5: {value:?}")
+            }
+            _ => return,
+        };
+        res.unwrap();
+    }
+}
+
+#[derive(Clone)]
+struct IoWriter<'a>(Rc<RefCell<&'a mut dyn std::fmt::Write>>);
+
+impl std::fmt::Write for IoWriter<'_> {
+    fn write_str(&mut self, s: &str) -> std::fmt::Result {
+        self.0
+            .borrow_mut()
+            .write_str(s)
+            .map_err(|_| std::fmt::Error)
+    }
 }
 
 #[derive(Clone)]

@@ -27,6 +27,7 @@ num-traits = "0.2"
 rand = "0.9"
 sha2 = "0.10"
 thiserror = "2.0"
+tracing = "0.1.41"
 tycho-crypto = { version = "0.4.0", features = ["rand9"] }
 unicode-segmentation = "1.0"
 
@@ -35,7 +36,7 @@ tycho-types = { version = "0.2.1", default-features = false, features = [
     "base64",
     "models",
 ] }
-tycho-vm = { version = "0.2.0", features = ["dump"] }
+tycho-vm = { version = "0.2.0", features = ["dump", "tracing"] }
 
 fift-proc = { path = "./proc", version = "=0.1.15" }
 
