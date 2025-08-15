@@ -515,10 +515,10 @@ define_stack_value! {
             as_hashmap(v): &HashMapTreeNode = Ok(v),
             rc_into_hashmap,
         },
-        VmCont(dyn tycho_vm::Cont) = {
-            eq(a, b) = std::ptr::addr_eq(a, b),
-            fmt_dump(v, f) = write!(f, "VmCont{{{:?}}}", v as *const _ as *const ()),
-            as_vm_cont(v): &dyn tycho_vm::Cont = Ok(v),
+        VmCont(tycho_vm::RcCont) = {
+            eq(a, b) = SafeRc::ptr_eq(a, b),
+            fmt_dump(v, f) = write!(f, "VmCont{{{:?}}}", v.as_ptr() as *const ()),
+            as_vm_cont(v): &tycho_vm::RcCont = Ok(v),
             rc_into_vm_cont,
         },
     }
@@ -696,7 +696,9 @@ impl DynFiftValue for SafeRc<dyn StackValue> {
     }
 
     fn into_vm_cont(self) -> Result<tycho_vm::RcCont> {
-        Self::into_inner(self).rc_into_vm_cont().map(SafeRc::from)
+        Self::into_inner(self)
+            .rc_into_vm_cont()
+            .map(Rc::unwrap_or_clone)
     }
 }
 

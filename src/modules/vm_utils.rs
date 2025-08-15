@@ -47,9 +47,7 @@ impl VmUtils {
         SafeRc::make_mut(&mut cs_raw).set_range(range);
 
         stack.push_raw(cs_raw.into_dyn_fift_value())?;
-        // TODO: Fix compile
-        // stack.push_raw(vmcont.into_dyn_fift_value())
-        Ok(())
+        stack.push(vmcont)
     }
 
     #[cmd(name = "(vmoplen)", stack)]
