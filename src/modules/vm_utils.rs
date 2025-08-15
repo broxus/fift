@@ -1,4 +1,5 @@
 use std::fmt::Write;
+use std::rc::Rc;
 
 use anyhow::Result;
 use tycho_types::prelude::*;
@@ -60,7 +61,16 @@ impl VmUtils {
         let c7 = if mode.contains(RunVmMode::LOAD_C7) {
             Some(stack.pop_tuple()?)
         } else {
-            Default::default()
+            None
+        };
+        let smc_info = tycho_vm::CustomSmcInfo {
+            version: tycho_vm::VmVersion::Ton(global_version),
+            c7: match c7 {
+                Some(tuple) => {
+                    SafeRc::from(Rc::new(fift_rc_tuple_to_vm(SafeRc::into_inner(tuple))))
+                }
+                None => Default::default(),
+            },
         };
 
         let data = if mode.contains(RunVmMode::LOAD_C4) {
@@ -79,12 +89,12 @@ impl VmUtils {
 
         let mut vm = {
             let mut state = tycho_vm::VmState::builder()
-                .with_smc_info(tycho_vm::CustomSmcInfo {
-                    version: tycho_vm::VmVersion::Ton(global_version),
-                    c7: Default::default(),
-                })
+                .with_smc_info(smc_info)
                 .with_data(data.clone().unwrap_or_default())
                 .with_code(code)
+                .with_raw_stack(SafeRc::new(tycho_vm::Stack {
+                    items: fift_tuple_to_vm(stack.take_items()),
+                }))
                 .with_libraries(&libraries)
                 .with_gas(gas);
             if mode.contains(RunVmMode::SAME_C3) {
@@ -93,6 +103,18 @@ impl VmUtils {
             state.build()
         };
         let res = !vm.run();
+
+        stack.set_items({
+            let stack = SafeRc::into_inner(std::mem::take(&mut vm.stack));
+            match Rc::try_unwrap(stack) {
+                Ok(stack) => stack.items.into_iter().map(vm_value_to_fift).collect(),
+                Err(stack) => stack
+                    .items
+                    .iter()
+                    .map(|item| vm_value_to_fift(item.clone()))
+                    .collect(),
+            }
+        });
 
         let (data, actions) = if let Some(commited) = vm.committed_state {
             (Some(commited.c4), Some(commited.c5))
@@ -174,6 +196,142 @@ impl VmUtils {
     #[cmd(name = "supported-version", stack)]
     fn interpret_supported_version(stack: &mut Stack) -> Result<()> {
         stack.push_int(SUPPORTED_VERSION)
+    }
+}
+
+fn fift_rc_tuple_to_vm(items: Rc<Vec<SafeRc<dyn StackValue>>>) -> Vec<tycho_vm::RcStackValue> {
+    match Rc::try_unwrap(items) {
+        Ok(items) => items.into_iter().map(fift_value_to_vm).collect(),
+        Err(items) => items
+            .iter()
+            .map(|item| fift_value_to_vm(item.clone()))
+            .collect(),
+    }
+}
+
+fn fift_tuple_to_vm(items: Vec<SafeRc<dyn StackValue>>) -> Vec<tycho_vm::RcStackValue> {
+    items.into_iter().map(fift_value_to_vm).collect()
+}
+
+fn fift_value_to_vm(item: SafeRc<dyn StackValue>) -> tycho_vm::RcStackValue {
+    match item.ty() {
+        StackValueType::Null => tycho_vm::Stack::make_null(),
+        StackValueType::NaN => tycho_vm::Stack::make_nan(),
+        StackValueType::Int => SafeRc::from(SafeRc::into_inner(item).rc_into_int().unwrap()),
+        StackValueType::Cell => SafeRc::from(SafeRc::into_inner(item).rc_into_cell().unwrap()),
+        StackValueType::Builder => {
+            SafeRc::from(SafeRc::into_inner(item).rc_into_builder().unwrap())
+        }
+        StackValueType::Slice => {
+            SafeRc::from(SafeRc::into_inner(item).rc_into_cell_slice().unwrap())
+        }
+        StackValueType::Tuple => SafeRc::from(Rc::new(fift_rc_tuple_to_vm(
+            SafeRc::into_inner(item).rc_into_tuple().unwrap(),
+        ))),
+        StackValueType::VmCont => {
+            SafeRc::from(SafeRc::into_inner(item.into_vm_cont().unwrap()).rc_into_dyn())
+        }
+        // TODO: Somehow remove alloc here.
+        _ => SafeRc::from(Rc::new(CustomFiftValue(item))),
+    }
+}
+
+fn vm_rc_tuple_to_fift(items: Rc<Vec<tycho_vm::RcStackValue>>) -> Vec<SafeRc<dyn StackValue>> {
+    match Rc::try_unwrap(items) {
+        Ok(items) => items.into_iter().map(vm_value_to_fift).collect(),
+        Err(items) => items
+            .iter()
+            .map(|item| vm_value_to_fift(item.clone()))
+            .collect(),
+    }
+}
+
+fn vm_value_to_fift(item: tycho_vm::RcStackValue) -> SafeRc<dyn StackValue> {
+    if let Some(ty) = tycho_vm::StackValueType::from_raw(item.raw_ty()) {
+        return match ty {
+            tycho_vm::StackValueType::Null => Stack::make_null(),
+            tycho_vm::StackValueType::Int => match item.into_int() {
+                Ok(item) => item.into_dyn_fift_value(),
+                Err(_) => Stack::make_nan(),
+            },
+            tycho_vm::StackValueType::Cell => item.into_cell().unwrap().into_dyn_fift_value(),
+            tycho_vm::StackValueType::Slice => {
+                item.into_cell_slice().unwrap().into_dyn_fift_value()
+            }
+            tycho_vm::StackValueType::Builder => {
+                item.into_cell_builder().unwrap().into_dyn_fift_value()
+            }
+            tycho_vm::StackValueType::Cont => SafeRc::new_dyn_fift_value(item.into_cont().unwrap()),
+            tycho_vm::StackValueType::Tuple => SafeRc::new_dyn_fift_value(vm_rc_tuple_to_fift(
+                SafeRc::into_inner(item.into_tuple().unwrap()),
+            )),
+        };
+    }
+
+    let ptr = item.as_ptr();
+    let [_, vtable] =
+        unsafe { std::mem::transmute::<*const dyn tycho_vm::StackValue, [*const (); 2]>(ptr) };
+
+    if vtable == CustomFiftValue::VTABLE_PTR {
+        let value = Rc::into_raw(SafeRc::into_inner(item)).cast::<CustomFiftValue>();
+        let value = Rc::unwrap_or_clone(unsafe { Rc::from_raw(value) });
+        return value.0;
+    }
+
+    unreachable!()
+}
+
+#[derive(Clone)]
+#[repr(transparent)]
+struct CustomFiftValue(SafeRc<dyn StackValue>);
+
+impl CustomFiftValue {
+    const VTABLE_PTR: *const () = const {
+        let [_, vtable] = unsafe {
+            std::mem::transmute::<*const dyn tycho_vm::StackValue, [*const (); 2]>(
+                std::ptr::null::<CustomFiftValue>(),
+            )
+        };
+        vtable
+    };
+}
+
+impl std::fmt::Debug for CustomFiftValue {
+    #[inline]
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt_dump(f)
+    }
+}
+
+impl tycho_vm::StackValue for CustomFiftValue {
+    #[inline]
+    fn rc_into_dyn(self: Rc<Self>) -> Rc<dyn tycho_vm::StackValue> {
+        self
+    }
+
+    fn raw_ty(&self) -> u8 {
+        match self.0.ty() {
+            StackValueType::String => 100,
+            StackValueType::Bytes => 101,
+            StackValueType::Cont => 102,
+            StackValueType::WordList => 103,
+            StackValueType::SharedBox => 104,
+            StackValueType::Atom => 105,
+            StackValueType::HashMap => 106,
+            _ => unreachable!(),
+        }
+    }
+
+    fn store_as_stack_value(
+        &self,
+        _: &mut CellBuilder,
+        _: &dyn CellContext,
+    ) -> Result<(), tycho_types::error::Error> {
+        Err(tycho_types::error::Error::InvalidData)
+    }
+
+    fn fmt_dump(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt_dump(f)
     }
 }
 

@@ -25,12 +25,27 @@ impl Stack {
         NULL.with(|v| v.clone())
     }
 
+    pub fn make_nan() -> SafeRc<dyn StackValue> {
+        thread_local! {
+            static NAN: SafeRc<dyn StackValue> = SafeRc::new_dyn_fift_value(tycho_vm::NaN);
+        }
+        NAN.with(|v| v.clone())
+    }
+
     pub fn new(capacity: Option<usize>) -> Self {
         Self {
             items: Default::default(),
             capacity,
             atoms: Atoms::default(),
         }
+    }
+
+    pub fn take_items(&mut self) -> Vec<SafeRc<dyn StackValue>> {
+        std::mem::take(&mut self.items)
+    }
+
+    pub fn set_items(&mut self, items: Vec<SafeRc<dyn StackValue>>) {
+        self.items = items;
     }
 
     pub fn depth(&self) -> usize {
@@ -419,6 +434,12 @@ define_stack_value! {
             fmt_dump(_, f) = f.write_str("(null)"),
             as_null(v): &() = Ok(v),
             rc_into_null,
+        },
+        NaN(tycho_vm::NaN) = {
+            eq(_, _) = true,
+            fmt_dump(_, f) = f.write_str("NaN"),
+            as_nan(v): &tycho_vm::NaN = Ok(v),
+            rc_into_nan,
         },
         Int(BigInt) = {
             eq(a, b) = a == b,
