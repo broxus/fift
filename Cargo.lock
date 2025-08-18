@@ -270,7 +270,7 @@ checksum = "28dea519a9695b9977216879a3ebfddf92f1c08c05d984f8996aecd6ecdc811d"
 
 [[package]]
 name = "fift"
-version = "0.1.23"
+version = "0.2.0"
 dependencies = [
  "ahash",
  "anyhow",
@@ -294,7 +294,7 @@ dependencies = [
 
 [[package]]
 name = "fift-cli"
-version = "0.1.23"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "argh",
@@ -309,11 +309,11 @@ dependencies = [
 
 [[package]]
 name = "fift-libs"
-version = "0.1.23"
+version = "0.2.0"
 
 [[package]]
 name = "fift-proc"
-version = "0.1.15"
+version = "0.2.0"
 dependencies = [
  "darling",
  "quote",
@@ -799,8 +799,9 @@ dependencies = [
 
 [[package]]
 name = "tycho-vm"
-version = "0.2.0"
-source = "git+https://github.com/broxus/tycho-vm.git?rev=f38b81afd069192f19377ef74dfe06022c652059#f38b81afd069192f19377ef74dfe06022c652059"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "64b65d687d7f06dcb2645a3a3aa2a8bb6608cbbf55d01b230086898222294d0c"
 dependencies = [
  "ahash",
  "anyhow",
@@ -821,8 +822,9 @@ dependencies = [
 
 [[package]]
 name = "tycho-vm-proc"
-version = "0.2.0"
-source = "git+https://github.com/broxus/tycho-vm.git?rev=f38b81afd069192f19377ef74dfe06022c652059#f38b81afd069192f19377ef74dfe06022c652059"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3548fea44ef0cd0494084439572b2ece3e570f88e51d8b7aac95ea2b47706012"
 dependencies = [
  "darling",
  "proc-macro2",
