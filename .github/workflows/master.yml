@@ -3,8 +3,8 @@ on: [push, pull_request]
 name: master
 
 jobs:
-  check:
-    name: Check
+  clippy:
+    name: Clippy
     runs-on: ubuntu-latest
     steps:
       - name: Checkout sources
@@ -16,11 +16,13 @@ jobs:
           profile: minimal
           toolchain: stable
           override: true
+          components: clippy
 
-      - name: Run cargo check
+      - name: Run cargo clippy
         uses: actions-rs/cargo@v1
         with:
-          command: check
+          command: clippy
+          args: -- -D warnings
 
   test:
     name: Test Suite
@@ -41,29 +43,20 @@ jobs:
         with:
           command: test
 
-  lints:
-    name: Lints
+  fmt:
+    name: Formatter
     runs-on: ubuntu-latest
     steps:
       - name: Checkout sources
         uses: actions/checkout@v2
 
-      - name: Install stable toolchain
+      - name: Install nightly toolchain
         uses: actions-rs/toolchain@v1
         with:
           profile: minimal
-          toolchain: stable
+          toolchain: nightly
           override: true
-          components: rustfmt, clippy
+          components: rustfmt
 
       - name: Run cargo fmt
-        uses: actions-rs/cargo@v1
-        with:
-          command: fmt
-          args: --all -- --check
-
-      - name: Run cargo clippy
-        uses: actions-rs/cargo@v1
-        with:
-          command: clippy
-          args: -- -D warnings
+        run: cargo +nightly fmt --all -- --check

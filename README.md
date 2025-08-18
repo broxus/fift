@@ -8,15 +8,13 @@
 
 [docs-url]: https://docs.rs/fift
 
-[rust-version-badge]: https://img.shields.io/badge/rustc-1.70+-lightgray.svg
+[rust-version-badge]: https://img.shields.io/badge/rustc-1.88+-lightgray.svg
 
-[rust-version-link]: https://blog.rust-lang.org/2023/06/01/Rust-1.70.0.html
+[rust-version-link]: https://blog.rust-lang.org/2025/06/26/Rust-1.88.0/
 
 [workflow-badge]: https://img.shields.io/github/actions/workflow/status/broxus/fift/master.yml?branch=master
 
 [workflow-link]: https://github.com/broxus/fift/actions?query=workflow%3Amaster
-
-> Status: WIP
 
 ## About
 

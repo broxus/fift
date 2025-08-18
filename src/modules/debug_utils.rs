@@ -168,9 +168,5 @@ impl DebugUtils {
 }
 
 const fn opt_space(space_after: bool) -> &'static str {
-    if space_after {
-        " "
-    } else {
-        ""
-    }
+    if space_after { " " } else { "" }
 }
