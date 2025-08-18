@@ -16,9 +16,9 @@
 
 [workflow-link]: https://github.com/broxus/fift/actions?query=workflow%3Amaster
 
-## About
-
 Rust implementation of the Fift esoteric language.
+
+Try it online: <a href="https://play.fift.rs" target="_blank">https://play.fift.rs</a>
 
 ## Installation
 
