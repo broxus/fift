@@ -65,6 +65,7 @@ fn main() -> Result<ExitCode> {
             .unwrap_or_else(|| std::env::var("FIFTPATH").unwrap_or_default()),
     );
 
+    let is_terminal = std::io::stdin().is_terminal();
     let interactive = app.interactive || rest.is_empty() && app.source_files.is_empty();
 
     // Prepare the source block which will be executed
@@ -74,7 +75,7 @@ fn main() -> Result<ExitCode> {
 
     let mut stderr: Box<dyn std::fmt::Write>;
     if interactive {
-        if std::io::stdin().is_terminal() {
+        if is_terminal {
             let mut line_reader = LineReader::new()?;
             stdout = line_reader.create_external_printer()?;
             stderr = Box::new(ColorStderrWriter(std::io::stderr()));
@@ -119,7 +120,12 @@ fn main() -> Result<ExitCode> {
             Err(e) => e,
         };
 
-        if interactive {
+        let terminate = !is_terminal
+            && error
+                .downcast_ref::<fift::error::ExecutionAborted>()
+                .is_some();
+
+        if interactive && !terminate {
             eprintln!("{}", style("!!!").dim())
         }
 
@@ -135,7 +141,7 @@ fn main() -> Result<ExitCode> {
             );
         }
 
-        if !interactive {
+        if !interactive || terminate {
             return Ok(ExitCode::FAILURE);
         }
 
