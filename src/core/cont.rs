@@ -896,6 +896,6 @@ fn write_cont_name(
     if let Some(name) = d.resolve_name(cont) {
         f.write_str(name.trim_end())
     } else {
-        write!(f, "<continuation {:?}>", cont as *const dyn FiftCont)
+        write!(f, "<continuation {:?}>", cont as *const _ as *const ())
     }
 }
